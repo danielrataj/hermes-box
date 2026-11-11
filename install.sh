@@ -5,9 +5,12 @@
 #   ./install.sh            check, prepare, build, install systemd units;
 #                           starts the stack only if it is not running
 #   ./install.sh --restart  the same, then restart the stack to apply changes
-#   ./install.sh --no-build skip building the image
+#   ./install.sh --no-build skip building (or pulling) the image
 #   ./install.sh --prepare  stop once the image and the age key exist, before
 #                           anything is checked or started (used by setup.sh)
+#
+# The image is pulled when a published one is named (release.env, or
+# HERMES_BOX_IMAGE in instance/.env) and built from the Dockerfile otherwise.
 #
 # Needs: Docker with the compose plugin and the installation's own settings in
 # instance/ (see instance.example/); a first run creates that directory and
@@ -26,7 +29,7 @@ for arg in "$@"; do
     --restart) restart=1 ;;
     --no-build) build=0 ;;
     --prepare) prepare=1 ;;
-    -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -36,15 +39,28 @@ note() { printf '    %s\n' "$*"; }
 die()  { printf 'install: %s\n' "$*" >&2; exit 1; }
 
 # Read one KEY=value from instance/.env without executing the file.
-env_get() { sed -n "s/^$1=//p" instance/.env | tail -n1; }
+env_get() { sed -n "s/^$1=//p" instance/.env 2>/dev/null | tail -n1; }
+# The image to run: a published one named in instance/.env or in release.env
+# (written by docker/extract.sh), else the one built here from the Dockerfile.
+image_ref() {
+  local ref
+  ref="$(env_get HERMES_BOX_IMAGE)"
+  [ -n "$ref" ] || ref="$(sed -n 's/^HERMES_BOX_IMAGE=//p' "$REPO_DIR/release.env" 2>/dev/null | tail -n1)"
+  printf '%s' "${ref:-hermes-agent-local}"
+}
 
 # ── 1. Checks ────────────────────────────────────────────────────────────────
 say "Checking prerequisites"
 [ "$(id -u)" -eq 0 ] || die "run as root"
 command -v docker >/dev/null || die "Docker is not installed"
-for tool in curl git jq openssl python3; do
+for tool in curl jq openssl python3; do
   command -v "$tool" >/dev/null || die "$tool is not installed (used by check.sh and the backup)"
 done
+# git is needed only where the installation is a git checkout (automatic
+# deployment); one installed from a published image has no .git.
+if [ -d .git ]; then
+  command -v git >/dev/null || die "git is not installed (used by the automatic deployment)"
+fi
 docker compose version >/dev/null 2>&1 || die "the Docker compose plugin is missing"
 
 # instance/ holds what belongs to this installation only. It is not part of
@@ -80,6 +96,9 @@ RUN_GID="$(env_get HERMES_GID)";         RUN_GID="${RUN_GID:-1000}"
 KEY_FILE="$(env_get SOPS_AGE_KEY_FILE)"
 KEY_FILE="${KEY_FILE:-/etc/hermes/credentials/age.key}"
 DOMAIN="$(env_get HERMES_DOMAIN)"
+IMAGE="$(image_ref)"
+# compose.yaml reads the image name from the environment.
+export HERMES_BOX_IMAGE="$IMAGE"
 
 docker compose config -q || die "compose.yaml or instance/.env is invalid"
 
@@ -128,8 +147,13 @@ fi
 
 # ── 3. Image ─────────────────────────────────────────────────────────────────
 if [ "$build" -eq 1 ]; then
-  say "Building the image (first run downloads several GB)"
-  docker compose build gateway
+  if [ "$IMAGE" = hermes-agent-local ]; then
+    say "Building the image (first run downloads several GB)"
+    docker compose build gateway
+  else
+    say "Pulling the image $IMAGE (first run downloads several GB)"
+    docker pull --quiet "$IMAGE" >/dev/null
+  fi
   docker compose pull --quiet caddy
   [ "$signal" -eq 0 ] || docker compose pull --quiet signal
 fi
@@ -141,12 +165,12 @@ tool() {  # run sops / age-keygen from the image, offline
 }
 if [ ! -s "$KEY_FILE" ]; then
   install -d -m 700 "$(dirname "$KEY_FILE")"
-  (umask 077; tool --entrypoint age-keygen hermes-agent-local 2>/dev/null > "$KEY_FILE")
+  (umask 077; tool --entrypoint age-keygen "$IMAGE" 2>/dev/null > "$KEY_FILE")
   [ -s "$KEY_FILE" ] || die "could not create the age key $KEY_FILE"
   note "created a new age key: $KEY_FILE"
 fi
 chmod 600 "$KEY_FILE"
-PUBLIC_KEY="$(tool -v "$KEY_FILE:/age.key:ro" --entrypoint age-keygen hermes-agent-local -y /age.key)"
+PUBLIC_KEY="$(tool -v "$KEY_FILE:/age.key:ro" --entrypoint age-keygen "$IMAGE" -y /age.key)"
 note "this server's public key: $PUBLIC_KEY"
 
 # Recipients for sops; a new installation starts with this server's key only.
@@ -172,7 +196,7 @@ fi
   die "instance/secrets/hermes.enc.yaml is missing. Create it with ./sops.sh secrets/hermes.enc.yaml (one NAME: value per line); see README, Tajné údaje."
 for file in instance/secrets/*.enc.yaml; do
   if ! tool -e SOPS_AGE_KEY_FILE=/age.key -v "$KEY_FILE:/age.key:ro" -v "$REPO_DIR/instance/secrets:/instance/secrets:ro" \
-       --entrypoint sops hermes-agent-local decrypt "/$file" >/dev/null 2>&1; then
+       --entrypoint sops "$IMAGE" decrypt "/$file" >/dev/null 2>&1; then
     die "this server cannot decrypt $file. Where you can decrypt it: add the public key above to instance/.sops.yaml, run './sops.sh updatekeys ${file#instance/}', commit, then bring it here and run ./install.sh again."
   fi
 done
@@ -185,7 +209,7 @@ if [ -f "$DATA_DIR/.hermes/config.yaml" ]; then
   hermes_config() {
     docker run --rm --network none --entrypoint /opt/hermes/bin/hermes \
       -u "$RUN_UID:$RUN_GID" -e HERMES_HOME=/opt/data -e HOME=/opt/data \
-      -v "$DATA_DIR/.hermes:/opt/data" hermes-agent-local config "$@" 2>/dev/null
+      -v "$DATA_DIR/.hermes:/opt/data" "$IMAGE" config "$@" 2>/dev/null
   }
   want_url="https://$DOMAIN"
   if [ "$(hermes_config get webapp.enabled | tail -n1)" != "true" ]; then
@@ -216,7 +240,7 @@ units_changed=0
 install_unit() {  # <template> <target>
   local rendered
   rendered="$(mktemp)"
-  sed -e "s#@REPO_DIR@#$REPO_DIR#g" -e "s#@DATA_DIR@#$DATA_DIR#g" "$1" > "$rendered"
+  sed -e "s#@REPO_DIR@#$REPO_DIR#g" -e "s#@DATA_DIR@#$DATA_DIR#g" -e "s#@IMAGE@#$IMAGE#g" "$1" > "$rendered"
   if ! cmp -s "$rendered" "$2"; then
     install -D -m 644 "$rendered" "$2"
     note "updated $2"; units_changed=1
@@ -234,7 +258,10 @@ install_unit server/docker-volume.conf     /etc/systemd/system/docker.service.d/
 if [ "$units_changed" -eq 1 ]; then systemctl daemon-reload; else note "already up to date"; fi
 systemctl enable --quiet hermes-docker.service hermes-backup.timer hermes-monitor.timer
 systemctl start hermes-backup.timer hermes-monitor.timer
-if [ "$(env_get AUTO_DEPLOY)" = "true" ]; then
+if [ "$(env_get AUTO_DEPLOY)" = "true" ] && [ ! -d .git ]; then
+  systemctl disable --quiet --now hermes-deploy.timer 2>/dev/null || true
+  note "automatic deployment from git: off (AUTO_DEPLOY=true, but this installation is not a git checkout)"
+elif [ "$(env_get AUTO_DEPLOY)" = "true" ]; then
   systemctl enable --quiet --now hermes-deploy.timer
   note "automatic deployment from git: on"
 else

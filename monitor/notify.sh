@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sourced by the monitor and deploy scripts; expects REPO_DIR and env_get.
 #
 # notify <text>: write the text to stdout (the journal) and, when

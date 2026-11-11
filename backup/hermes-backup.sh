@@ -25,6 +25,14 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 # Read one KEY=value from .env without executing the file.
 env_get() { [ -f "$REPO_DIR/.env" ] && sed -n "s/^$1=//p" "$REPO_DIR/.env" | tail -n1 || true; }
+# The image to run: a published one named in instance/.env or in release.env
+# (written by docker/extract.sh), else the one built here from the Dockerfile.
+image_ref() {
+  local ref
+  ref="$(env_get HERMES_BOX_IMAGE)"
+  [ -n "$ref" ] || ref="$(sed -n 's/^HERMES_BOX_IMAGE=//p' "$REPO_DIR/release.env" 2>/dev/null | tail -n1)"
+  printf '%s' "${ref:-hermes-agent-local}"
+}
 
 SRC="$(env_get HERMES_DATA_DIR)"
 SRC="${SRC:-/home/hermes}"
@@ -58,7 +66,7 @@ if [ -f "$REPO_DIR/instance/secrets/backup.enc.yaml" ]; then
   RESTIC_PASSWORD="$(docker run --rm --network none \
     -e SOPS_AGE_KEY_FILE=/age.key -e SOPS_DISABLE_VERSION_CHECK=1 \
     -v "$KEY_FILE:/age.key:ro" -v "$REPO_DIR/instance/secrets:/secrets:ro" \
-    --entrypoint sops hermes-agent-local \
+    --entrypoint sops "$(image_ref)" \
     decrypt --extract '["RESTIC_PASSWORD"]' /secrets/backup.enc.yaml)"
   [ -n "$RESTIC_PASSWORD" ] || { echo "backup: RESTIC_PASSWORD is empty" >&2; exit 1; }
   export RESTIC_PASSWORD

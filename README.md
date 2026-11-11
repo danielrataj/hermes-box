@@ -16,20 +16,34 @@ Host potřebuje jen Docker a jeden soukromý klíč; žádná cizí služba pro 
 
 ## Instalace
 
-Potřebuješ server s Linuxem a Dockerem, doménu mířící na jeho adresu
-a otevřené porty 80 a 443. Vše se pouští jako root v adresáři repozitáře,
-obvykle `/opt/hermes-docker`.
+Potřebuješ server s Linuxem (x86_64) a Dockerem, doménu mířící na jeho adresu
+a otevřené porty 80 a 443. Vše se pouští jako root.
 
 ### Nová instalace
 
+Stačí hotový image; nic se nestaví ani neklonuje. První příkaz z něj vybalí
+`compose.yaml`, skripty a systemd units do `/opt/hermes-box`, druhý spustí
+průvodce:
+
 ```bash
-./setup.sh
+docker run --rm -v /opt/hermes-box:/out --entrypoint hermes-box-extract ghcr.io/danielrataj/hermes-box:1
 ```
+
+```bash
+cd /opt/hermes-box && ./setup.sh
+```
+
+Tag `:1` je poslední vydání řady 1. Instalace si zapamatuje přesnou verzi,
+kterou dostala (`release.env`), a sama od sebe se nemění; viz
+[Aktualizace](#aktualizace).
+
+Chybějící `curl`, `jq`, `openssl` a `python3` si průvodce na Debianu a Ubuntu
+doinstaluje sám.
 
 Průvodce se zeptá na pár věcí a provede celé první nastavení:
 
 1. doména Webapp → `instance/.env`,
-2. sestavení image, uživatel, datové adresáře, soukromý klíč serveru,
+2. uživatel, datové adresáře, soukromý klíč serveru,
 3. první zašifrované tajné údaje včetně náhodného hesla k zálohám,
 4. model a poskytovatel: spustí vlastního průvodce Hermes,
 5. přihlášení do Webapp: jméno a heslo, nebo účet Nous Portal,
@@ -47,14 +61,15 @@ soukromý git repozitář.
 
 ### Existující instalace, obnova, další server
 
-Naklonovat svůj repozitář instance do `instance/` a spustit:
+Vybalit soubory z image jako u nové instalace, naklonovat svůj repozitář
+instance do `/opt/hermes-box/instance/` a spustit:
 
 ```bash
 ./install.sh
 ```
 
-Skript zkontroluje předpoklady, založí uživatele a adresáře, sestaví image,
-ověří klíč a tajné údaje, nastaví Webapp v `config.yaml`, nainstaluje systemd
+Skript zkontroluje předpoklady, založí uživatele a adresáře, stáhne nebo
+sestaví image, ověří klíč a tajné údaje, nastaví Webapp v `config.yaml`, nainstaluje systemd
 units a stack spustí. Lze ho pouštět opakovaně; existující data nemění. Běžící
 stack nechá být, dokud nedostane `--restart`. Na novém serveru vytvoří klíč
 a vypíše jeho veřejnou část; tu je potřeba přidat mezi příjemce tajných údajů
@@ -72,11 +87,15 @@ a vypíše jeho veřejnou část; tu je potřeba přidat mezi příjemce tajnýc
 | `AUTO_DEPLOY` | vypnuto | `true`: server sám nasazuje nové commity |
 | `HERMES_DATA_DIR` | `/home/hermes` | kde leží veškerý stav |
 | `HERMES_UID`, `HERMES_GID` | `1000` | vlastník dat |
-| `HERMES_IMAGE_TAG` | `stable` | `stable-desktop` pro Bot Desktop |
+| `HERMES_BOX_IMAGE` | z `release.env` | jiný image, než se kterým instalace přišla |
+| `HERMES_IMAGE_TAG` | verze z `Dockerfile` | jen při vlastním sestavení: jiná verze Hermes, např. `v0.23.1-desktop` pro Bot Desktop |
 
 Soubor `.env` v kořeni je jen odkaz na `instance/.env`, který vytváří `install.sh`.
 
 ### Nasazení změny
+
+Platí pro instalaci z gitu (viz [Instalace z gitu](#instalace-z-gitu));
+instalace z image se mění postupem z kapitoly [Aktualizace](#aktualizace).
 
 **Automaticky** (`AUTO_DEPLOY=true` v `instance/.env`): stačí `git push`, ať už
 do tohoto repozitáře, nebo do repozitáře instance. Server každých
@@ -121,7 +140,7 @@ Dva až tři kontejnery (Signal je volitelný), všechny se síťovým režimem 
 
 | Kontejner | Image | Co dělá | Kde poslouchá |
 | --- | --- | --- | --- |
-| `hermes` | `hermes-agent-local` (sestavený z `Dockerfile`) | gateway: agent, Signal, cron, sessions, Bots; k tomu Webapp a dashboard | Webapp `127.0.0.1:9120`, dashboard `127.0.0.1:9119` |
+| `hermes` | `ghcr.io/danielrataj/hermes-box:<verze>`, nebo `hermes-agent-local` sestavený z `Dockerfile` | gateway: agent, Signal, cron, sessions, Bots; k tomu Webapp a dashboard | Webapp `127.0.0.1:9120`, dashboard `127.0.0.1:9119` |
 | `hermes-signal` | `ghcr.io/asamk/signal-cli:0.14.5` | HTTP démon signal-cli | `127.0.0.1:8080` |
 | `hermes-caddy` | `caddy:2.11` | TLS a reverse proxy | `80`, `443` |
 
@@ -145,7 +164,10 @@ pádu nahodí Docker.
 | `setup.sh` | průvodce první instalací |
 | `install.sh` | instalace a nasazení změn |
 | `compose.yaml` | definice všech tří kontejnerů |
-| `Dockerfile` | oficiální image Hermes + `sops`, `age`, `uv` a `himalaya` |
+| `Dockerfile` | oficiální image Hermes + `sops`, `age`, `uv` a `himalaya`; nese i soubory z této tabulky |
+| `docker/extract.sh` | vybalí soubory z image na server (`hermes-box-extract`) |
+| `release.env` | jen u instalace z image: který image běží |
+| `.github/workflows/image.yml` | sestavení a kontrola image, vydání při tagu `v*` |
 | `docker/secrets-entrypoint.sh` | při startu rozšifruje tajné údaje do prostředí a do souborů v paměti |
 | `sops.sh` | úprava tajných údajů bez instalace `sops` |
 | `instance.example/` | vzor adresáře `instance/` |
@@ -330,16 +352,55 @@ Zpráva odchází přes místní signal-cli. Když neběží Signal nebo celý s
 nepřijde nic; to pokryje jen kontrola veřejné adresy zvenku (UptimeRobot
 a podobné).
 
-## Upgrade Hermes
+## Aktualizace
+
+Nová verze je nový image. Vybalit z něj soubory přes ty stávající a nasadit:
 
 ```bash
-docker compose build --pull gateway && ./install.sh --no-build --restart
+docker run --rm -v /opt/hermes-box:/out --entrypoint hermes-box-extract ghcr.io/danielrataj/hermes-box:1
 ```
 
-Tag `stable` se posouvá, takže `--pull` stáhne aktuální stabilní verzi. Před
-upgradem je dobré pustit zálohu (`systemctl start hermes-backup`).
+```bash
+cd /opt/hermes-box && ./install.sh --restart
+```
+
+`instance/` ani data se nemění. Před aktualizací je dobré pustit zálohu
+(`systemctl start hermes-backup`).
+
+Návrat k předchozí verzi je totéž s jejím přesným tagem, např. `:1.0.0`.
+Která verze běží: `cat /opt/hermes-box/release.env`.
+
+## Instalace z gitu
+
+Pro vývoj a pro server, který má sledovat větev: naklonovat repozitář místo
+vybalení z image. Bez `release.env` si `install.sh` image sestaví sám
+z `Dockerfile` (jméno `hermes-agent-local`) a lze zapnout `AUTO_DEPLOY`.
+
+```bash
+git clone https://github.com/danielrataj/hermes-box.git /opt/hermes-box
+```
+
+```bash
+cd /opt/hermes-box && ./setup.sh
+```
+
+## Vydání nové verze
+
+Verze Hermes je připnutá v `Dockerfile` (`HERMES_IMAGE_TAG`). Upgrade Hermes
+je změna toho tagu; CI při každé změně image sestaví a vyzkouší, takže
+verze, na kterou `Dockerfile` nesedí, neprojde.
+
+Vydání je tag ve tvaru `v1.2.3`:
+
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+```
+
+CI zveřejní `ghcr.io/danielrataj/hermes-box:1.2.3` a posune `:1.2` a `:1`.
+Tag s příponou (`v1.2.3-rc.1`) zveřejní jen sám sebe.
 
 signal-cli se nikdy nevrací na starší verzi, než která naposledy zapsala data.
+To platí i pro návrat k starší verzi image.
 
 ## Záloha
 
@@ -376,7 +437,7 @@ mkdir -p /restore
 ```
 
 ```bash
-export RESTIC_PASSWORD="$(docker run --rm --network none -e SOPS_AGE_KEY_FILE=/age.key -v /etc/hermes/credentials/age.key:/age.key:ro -v "$PWD/instance/secrets:/secrets:ro" --entrypoint sops hermes-agent-local decrypt --extract '["RESTIC_PASSWORD"]' /secrets/backup.enc.yaml)"
+export RESTIC_PASSWORD="$(docker run --rm --network none -e SOPS_AGE_KEY_FILE=/age.key -v /etc/hermes/credentials/age.key:/age.key:ro -v "$PWD/instance/secrets:/secrets:ro" --entrypoint sops "$(docker inspect -f '{{.Config.Image}}' hermes)" decrypt --extract '["RESTIC_PASSWORD"]' /secrets/backup.enc.yaml)"
 ```
 
 ```bash
