@@ -24,7 +24,7 @@ if [ -z "$KEY_FILE" ]; then
   done
 fi
 if [ ! -r "$KEY_FILE" ]; then
-  echo "no age key found; set SOPS_AGE_KEY_FILE (see README, Tajné údaje)" >&2
+  echo "no age key found; set SOPS_AGE_KEY_FILE (see README, Secrets)" >&2
   exit 1
 fi
 

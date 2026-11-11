@@ -1,30 +1,30 @@
 # Instance
 
-Vzor adresáře `instance/`: vše, co patří jedné konkrétní instalaci. Repozitář
-s řešením je pro všechny instalace stejný a o tomto adresáři nic neví
-(má ho v `.gitignore`).
+Template of the `instance/` directory: everything that belongs to one specific
+installation. The solution repository is the same for all installations and
+knows nothing about this directory (it has it in `.gitignore`).
 
-| Soubor | Obsah |
+| File | Contents |
 | --- | --- |
-| `.env` | nastavení instalace: doména, číslo Signal účtu, cesty (vzor: `env.example`) |
-| `.sops.yaml` | veřejné klíče těch, kdo smí rozšifrovat tajné údaje; první verzi vytvoří `install.sh` |
-| `secrets/hermes.enc.yaml` | tajné údaje agenta, zašifrované |
-| `secrets/backup.enc.yaml` | heslo k zálohám, zašifrované |
+| `.env` | installation settings: domain, Signal account number, paths (template: `env.example`) |
+| `.sops.yaml` | public keys of those who may decrypt the secrets; the first version is created by `install.sh` |
+| `secrets/hermes.enc.yaml` | the agent's secrets, encrypted |
+| `secrets/backup.enc.yaml` | the backup password, encrypted |
 
-## Doporučení: vlastní soukromý repozitář
+## Recommendation: your own private repository
 
-Udělej z `instance/` git repozitář a pushuj ho do soukromého úložiště:
+Turn `instance/` into a git repository and push it to private storage:
 
 ```bash
 cd instance && git init -b master && git add -A && git commit -m "Instance settings"
 ```
 
-- Tajné údaje pak upravíš na svém počítači (`./sops.sh secrets/hermes.enc.yaml`)
-  a pošleš přes `git push`.
-- Se zapnutým `AUTO_DEPLOY=true` si server změny v tomto repozitáři stahuje
-  a nasazuje stejně jako změny řešení.
-- Při obnově serveru stačí naklonovat řešení, do něj tento repozitář jako
-  `instance/` a spustit `./install.sh`.
+- You then edit the secrets on your own computer
+  (`./sops.sh secrets/hermes.enc.yaml`) and send them with `git push`.
+- With `AUTO_DEPLOY=true` enabled, the server fetches and deploys changes in
+  this repository the same way as changes to the solution.
+- When restoring the server, it is enough to clone the solution, clone this
+  repository into it as `instance/`, and run `./install.sh`.
 
-Soubory v `secrets/` jsou zašifrované, ale `.env` obsahuje doménu a telefonní
-číslo. Repozitář proto nech soukromý.
+The files in `secrets/` are encrypted, but `.env` contains the domain and the
+phone number. So keep the repository private.
