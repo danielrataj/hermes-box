@@ -1,0 +1,8 @@
+# The image is published. Nothing of one installation may reach the build.
+.git
+.github
+.claude
+.env
+instance
+deploy/PAUSE
+.DS_Store

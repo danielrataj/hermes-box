@@ -17,20 +17,34 @@ The solution is split into two parts:
 
 ## Installation
 
-You need a server with Linux and Docker, a domain pointing at its address, and
-ports 80 and 443 open. Everything is run as root in the repository directory,
-usually `/opt/hermes-docker`.
+You need a server with Linux (x86_64) and Docker, a domain pointing at its
+address, and ports 80 and 443 open. Everything is run as root.
 
 ### New installation
 
+The published image is enough; nothing is built or cloned. The first command
+extracts `compose.yaml`, the scripts and the systemd units from it into
+`/opt/hermes-box`, the second starts the wizard:
+
 ```bash
-./setup.sh
+docker run --rm -v /opt/hermes-box:/out --entrypoint hermes-box-extract ghcr.io/danielrataj/hermes-box:1
 ```
+
+```bash
+cd /opt/hermes-box && ./setup.sh
+```
+
+The `:1` tag is the latest release of the 1 series. The installation remembers
+the exact version it received (`release.env`) and does not change by itself;
+see [Updating](#updating).
+
+On Debian and Ubuntu the wizard installs a missing `curl`, `jq`, `openssl` and
+`python3` by itself.
 
 The wizard asks a few questions and performs the whole initial setup:
 
 1. the Webapp domain → `instance/.env`,
-2. image build, user, data directories, the server's private key,
+2. user, data directories, the server's private key,
 3. the first encrypted secrets, including a random backup password,
 4. model and provider: runs Hermes's own wizard,
 5. Webapp login: a user name and password, or a Nous Portal account,
@@ -49,14 +63,15 @@ server, ideally as a private git repository.
 
 ### Existing installation, restore, another server
 
-Clone your instance repository into `instance/` and run:
+Extract the files from the image as for a new installation, clone your
+instance repository into `/opt/hermes-box/instance/` and run:
 
 ```bash
 ./install.sh
 ```
 
-The script checks the prerequisites, creates the user and directories, builds
-the image, verifies the key and secrets, configures the Webapp in
+The script checks the prerequisites, creates the user and directories, pulls or
+builds the image, verifies the key and secrets, configures the Webapp in
 `config.yaml`, installs the systemd units and starts the stack. It can be run
 repeatedly; it does not change existing data. It leaves a running stack alone
 unless it is given `--restart`. On a new server it creates a key and prints its
@@ -75,12 +90,17 @@ Secrets).
 | `AUTO_DEPLOY` | off | `true`: the server deploys new commits by itself |
 | `HERMES_DATA_DIR` | `/home/hermes` | where all state lives |
 | `HERMES_UID`, `HERMES_GID` | `1000` | owner of the data |
-| `HERMES_IMAGE_TAG` | `stable` | `stable-desktop` for Bot Desktop |
+| `HERMES_BOX_IMAGE` | from `release.env` | an image other than the one the installation came with |
+| `HERMES_IMAGE_TAG` | the version in the `Dockerfile` | only when building yourself: another Hermes version, e.g. `v0.23.1-desktop` for Bot Desktop |
 
 The `.env` file in the root is only a link to `instance/.env`, created by
 `install.sh`.
 
 ### Deploying a change
+
+This applies to an installation from git (see
+[Installing from git](#installing-from-git)); an installation from the image is
+changed as described in [Updating](#updating).
 
 **Automatically** (`AUTO_DEPLOY=true` in `instance/.env`): a `git push` is
 enough, whether to this repository or to the instance repository. Every
@@ -127,7 +147,7 @@ Two to three containers (Signal is optional), all with the `host` network mode:
 
 | Container | Image | What it does | Where it listens |
 | --- | --- | --- | --- |
-| `hermes` | `hermes-agent-local` (built from the `Dockerfile`) | gateway: agent, Signal, cron, sessions, Bots; plus the Webapp and dashboard | Webapp `127.0.0.1:9120`, dashboard `127.0.0.1:9119` |
+| `hermes` | `ghcr.io/danielrataj/hermes-box:<version>`, or `hermes-agent-local` built from the `Dockerfile` | gateway: agent, Signal, cron, sessions, Bots; plus the Webapp and dashboard | Webapp `127.0.0.1:9120`, dashboard `127.0.0.1:9119` |
 | `hermes-signal` | `ghcr.io/asamk/signal-cli:0.14.5` | signal-cli HTTP daemon | `127.0.0.1:8080` |
 | `hermes-caddy` | `caddy:2.11` | TLS and reverse proxy | `80`, `443` |
 
@@ -152,7 +172,10 @@ Docker brings it back up after a crash.
 | `setup.sh` | first-installation wizard |
 | `install.sh` | installation and deployment of changes |
 | `compose.yaml` | definition of all three containers |
-| `Dockerfile` | the official Hermes image + `sops`, `age`, `uv` and `himalaya` |
+| `Dockerfile` | the official Hermes image + `sops`, `age`, `uv` and `himalaya`; also carries the files in this table |
+| `docker/extract.sh` | extracts the files from the image onto the server (`hermes-box-extract`) |
+| `release.env` | only for an installation from the image: which image is running |
+| `.github/workflows/image.yml` | image build and check, release on a `v*` tag |
 | `docker/secrets-entrypoint.sh` | on start, decrypts the secrets into the environment and into in-memory files |
 | `sops.sh` | editing secrets without installing `sops` |
 | `instance.example/` | template of the `instance/` directory |
@@ -346,17 +369,57 @@ The message goes out through the local signal-cli. When Signal or the whole
 server is down, nothing arrives; only an external check of the public address
 covers that (UptimeRobot and the like).
 
-## Upgrading Hermes
+## Updating
+
+A new version is a new image. Extract the files from it over the existing ones
+and deploy:
 
 ```bash
-docker compose build --pull gateway && ./install.sh --no-build --restart
+docker run --rm -v /opt/hermes-box:/out --entrypoint hermes-box-extract ghcr.io/danielrataj/hermes-box:1
 ```
 
-The `stable` tag moves, so `--pull` fetches the current stable version. It is a
-good idea to run a backup before upgrading (`systemctl start hermes-backup`).
+```bash
+cd /opt/hermes-box && ./install.sh --restart
+```
+
+Neither `instance/` nor the data changes. It is a good idea to run a backup
+before updating (`systemctl start hermes-backup`).
+
+Going back to a previous version is the same with its exact tag, e.g. `:1.0.0`.
+Which version is running: `cat /opt/hermes-box/release.env`.
+
+## Installing from git
+
+For development, and for a server that should follow a branch: clone the
+repository instead of extracting it from the image. Without `release.env`,
+`install.sh` builds the image itself from the `Dockerfile` (named
+`hermes-agent-local`) and `AUTO_DEPLOY` can be enabled.
+
+```bash
+git clone https://github.com/danielrataj/hermes-box.git /opt/hermes-box
+```
+
+```bash
+cd /opt/hermes-box && ./setup.sh
+```
+
+## Releasing a new version
+
+The Hermes version is pinned in the `Dockerfile` (`HERMES_IMAGE_TAG`).
+Upgrading Hermes is a change of that tag; CI builds and tests the image in
+every pull request, so a version the `Dockerfile` does not fit will not pass.
+
+A release is a tag of the form `v1.2.3`:
+
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+```
+
+CI publishes `ghcr.io/danielrataj/hermes-box:1.2.3` and moves `:1.2` and `:1`.
+A tag with a suffix (`v1.2.3-rc.1`) publishes only itself.
 
 signal-cli never goes back to a version older than the one that last wrote the
-data.
+data. This also applies to going back to an older image version.
 
 ## Backup
 
@@ -396,7 +459,7 @@ mkdir -p /restore
 ```
 
 ```bash
-export RESTIC_PASSWORD="$(docker run --rm --network none -e SOPS_AGE_KEY_FILE=/age.key -v /etc/hermes/credentials/age.key:/age.key:ro -v "$PWD/instance/secrets:/secrets:ro" --entrypoint sops hermes-agent-local decrypt --extract '["RESTIC_PASSWORD"]' /secrets/backup.enc.yaml)"
+export RESTIC_PASSWORD="$(docker run --rm --network none -e SOPS_AGE_KEY_FILE=/age.key -v /etc/hermes/credentials/age.key:/age.key:ro -v "$PWD/instance/secrets:/secrets:ro" --entrypoint sops "$(docker inspect -f '{{.Config.Image}}' hermes)" decrypt --extract '["RESTIC_PASSWORD"]' /secrets/backup.enc.yaml)"
 ```
 
 ```bash

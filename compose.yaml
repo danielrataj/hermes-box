@@ -28,12 +28,15 @@ x-logging: &logging
 
 services:
   gateway:
+    # A published image (HERMES_BOX_IMAGE, from release.env or instance/.env)
+    # is pulled; without one the image is built here from the Dockerfile.
     build:
       context: .
       args:
-        # `stable-desktop` instead, if bots need their own screen (Bot Desktop).
-        HERMES_IMAGE_TAG: ${HERMES_IMAGE_TAG:-stable}
-    image: hermes-agent-local
+        # Empty: the Hermes version pinned in the Dockerfile. Set it to e.g.
+        # v0.23.1-desktop if bots need their own screen (Bot Desktop).
+        HERMES_IMAGE_TAG: ${HERMES_IMAGE_TAG:-}
+    image: ${HERMES_BOX_IMAGE:-hermes-agent-local}
     container_name: hermes
     logging: *logging
     # Started by hermes-docker.service. `docker compose up` keeps running while

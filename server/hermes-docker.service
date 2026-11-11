@@ -1,5 +1,5 @@
-# Template; ./install.sh fills in @REPO_DIR@ and @DATA_DIR@ and installs it as
-# /etc/systemd/system/hermes-docker.service
+# Template; ./install.sh fills in @REPO_DIR@, @DATA_DIR@ and @IMAGE@ and
+# installs it as /etc/systemd/system/hermes-docker.service
 
 [Unit]
 Description=Hermes Agent (Docker Compose)
@@ -16,6 +16,9 @@ ConditionPathExists=@DATA_DIR@/.hermes/config.yaml
 [Service]
 Type=simple
 WorkingDirectory=@REPO_DIR@
+# The image compose.yaml runs, as install.sh resolved it: a published one, or
+# hermes-agent-local where the image is built on this server.
+Environment=HERMES_BOX_IMAGE=@IMAGE@
 ExecStart=/usr/bin/docker compose up --remove-orphans
 ExecStop=/usr/bin/docker compose down
 # The gateway drains running turns before it exits.
