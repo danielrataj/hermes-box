@@ -31,7 +31,7 @@ jobs:
       - name: Check the scripts
         run: |
           shellcheck --severity=error \
-            install.sh setup.sh check.sh sops.sh \
+            get.sh install.sh setup.sh check.sh sops.sh \
             backup/*.sh monitor/*.sh deploy/*.sh docker/*.sh
 
       - name: Name and version
