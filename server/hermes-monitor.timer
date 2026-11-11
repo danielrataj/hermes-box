@@ -1,0 +1,12 @@
+# Installed by ./install.sh as /etc/systemd/system/hermes-monitor.timer
+
+[Unit]
+Description=Hermes health check every 10 minutes
+
+[Timer]
+# Leave time for the stack to come up after boot.
+OnBootSec=5min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,8 @@
+# Everything that belongs to one installation (settings, encrypted secrets,
+# who may decrypt them) lives in instance/, a directory or git repository of
+# its own. /.env is a symlink to instance/.env made by install.sh.
+/instance/
+/.env
+.DS_Store
+# Created on a server to pause automatic deployment.
+deploy/PAUSE

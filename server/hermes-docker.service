@@ -1,0 +1,29 @@
+# Template; ./install.sh fills in @REPO_DIR@ and @DATA_DIR@ and installs it as
+# /etc/systemd/system/hermes-docker.service
+
+[Unit]
+Description=Hermes Agent (Docker Compose)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+# A host install of the same services must never run next to this one.
+Conflicts=hermes-gateway.service hermes-dashboard.service caddy.service signal-cli.service
+# Never start on an empty data directory: if its volume is not mounted, Docker
+# would create empty directories and the agent would boot with blank state.
+RequiresMountsFor=@DATA_DIR@
+ConditionPathExists=@DATA_DIR@/.hermes/config.yaml
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO_DIR@
+ExecStart=/usr/bin/docker compose up --remove-orphans
+ExecStop=/usr/bin/docker compose down
+# The gateway drains running turns before it exits.
+TimeoutStopSec=240
+Restart=on-failure
+RestartSec=10
+# Exit 78 = configuration error (missing token or project ID): do not loop.
+RestartPreventExitStatus=78
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+# Installed by ./install.sh as /etc/systemd/system/hermes-deploy.timer
+# Enabled only when AUTO_DEPLOY=true in instance/.env.
+
+[Unit]
+Description=Look for new Hermes configuration in git every 5 minutes
+
+[Timer]
+# Minutes 2, 7, 12, ...: off the 10-minute marks the agent's cron jobs use.
+OnCalendar=*:2/5
+Persistent=false
+
+[Install]
+WantedBy=timers.target

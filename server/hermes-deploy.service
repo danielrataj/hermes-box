@@ -1,0 +1,14 @@
+# Template; ./install.sh fills in @REPO_DIR@ and installs it as
+# /etc/systemd/system/hermes-deploy.service
+# Started by hermes-deploy.timer; run by hand with: systemctl start hermes-deploy
+
+[Unit]
+Description=Deploy new Hermes configuration from git
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@REPO_DIR@/deploy/hermes-deploy.sh
+# A changed Dockerfile means a build that can take a long time.
+TimeoutStartSec=60min

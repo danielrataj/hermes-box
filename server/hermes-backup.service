@@ -1,0 +1,17 @@
+# Template; ./install.sh fills in @REPO_DIR@ and @DATA_DIR@ and installs it as
+# /etc/systemd/system/hermes-backup.service
+# Started by hermes-backup.timer; run by hand with: systemctl start hermes-backup
+
+[Unit]
+Description=Hermes state backup (restic)
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=@DATA_DIR@
+# Report a failed backup right away instead of at the next periodic check.
+OnFailure=hermes-monitor.service
+
+[Service]
+Type=oneshot
+ExecStart=@REPO_DIR@/backup/hermes-backup.sh
+Nice=10
+IOSchedulingClass=idle

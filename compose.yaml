@@ -1,0 +1,142 @@
+# Hermes Agent on a server, in Docker.
+#
+#   gateway    the agent (Signal, cron, sessions, bots), supervised by s6
+#   Webapp     Hermes Desktop in a browser, incl. Bots; served by the gateway
+#              on 127.0.0.1:9120, published by Caddy at HERMES_DOMAIN
+#   dashboard  admin panel on 127.0.0.1:9119; not published, use an SSH tunnel
+#   signal     signal-cli HTTP daemon on 127.0.0.1:8080 (optional)
+#   caddy      TLS and reverse proxy for the Webapp
+#
+# This repository is the same for every installation. What differs lives in
+# instance/ (see instance.example/): the settings in instance/.env and the
+# encrypted secrets in instance/secrets/. `./install.sh` sets up the rest.
+# Secrets are decrypted inside the container at start, so they never appear
+# in `docker inspect` or unencrypted on disk.
+#
+# All state lives under HERMES_DATA_DIR; the image is stateless.
+# Changes to this file are deployed by deploy/hermes-deploy.sh with a restart.
+
+name: hermes
+
+# Docker keeps container logs without a limit by default; cap them so they
+# cannot fill the system disk. Hermes keeps its own logs in the data directory.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  gateway:
+    build:
+      context: .
+      args:
+        # `stable-desktop` instead, if bots need their own screen (Bot Desktop).
+        HERMES_IMAGE_TAG: ${HERMES_IMAGE_TAG:-stable}
+    image: hermes-agent-local
+    container_name: hermes
+    logging: *logging
+    # Started by hermes-docker.service. `docker compose up` keeps running while
+    # Caddy and Signal are up, so systemd does not notice this container
+    # dying; Docker restarts it instead. Capped, so a configuration error
+    # (exit 78: missing key or secrets) does not loop forever. Docker itself waits for the data
+    # directory's mount (server/docker-volume.conf).
+    restart: on-failure:5
+    command: ["gateway", "run"]
+    # Reported by `docker ps` and check.sh; Docker does not restart on it.
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "--max-time", "10", "http://127.0.0.1:9120/"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 180s
+
+    # Host networking: signal-cli listens on the host's 127.0.0.1:8080, and
+    # Caddy reaches the Webapp on the host's loopback.
+    network_mode: host
+
+    secrets:
+      - age_key
+    # Secrets with a multi-line value (SSH keys) are written here instead of
+    # into the environment; see docker/secrets-entrypoint.sh. In memory only.
+    tmpfs:
+      - /run/hermes-secrets:mode=0755,size=1m
+    environment:
+      # Owner of the data directory on the host.
+      HERMES_UID: "${HERMES_UID:-1000}"
+      HERMES_GID: "${HERMES_GID:-1000}"
+      HERMES_DASHBOARD: "1"
+      HERMES_DASHBOARD_HOST: "127.0.0.1"
+      # Tools run with HOME=/opt/data instead of the isolated /opt/data/home,
+      # so `~/.hermes/...` and `~/.config/himalaya` in cron jobs and skills
+      # resolve as they did on a host install. `~/.hermes` relies on the
+      # symlink <data>/.hermes/.hermes -> . that install.sh creates.
+      # Only a default: `terminal.home_mode` in config.yaml overrides it, so
+      # install.sh sets that key to `real` as well.
+      TERMINAL_HOME_MODE: real
+      # Where write_file and patch may write. The image allows only /opt/data;
+      # the data is also mounted under /home/hermes/... (see volumes), and cron
+      # jobs keep their state files under those absolute paths. The check
+      # compares path prefixes, so each mount has to be listed.
+      HERMES_WRITE_SAFE_ROOT: "/opt/data:/home/hermes/.hermes:/home/hermes/openknowledge:/home/hermes/projects:/home/hermes/.local/bin"
+
+    volumes:
+      # The agent's secrets, encrypted; see docker/secrets-entrypoint.sh.
+      - ./instance/secrets/hermes.enc.yaml:/etc/hermes/secrets.enc.yaml:ro
+      - ${HERMES_DATA_DIR:-/home/hermes}/.hermes:/opt/data
+      # Cron jobs and state files reference these absolute paths, so the
+      # container side stays /home/hermes/... wherever the data lives.
+      - ${HERMES_DATA_DIR:-/home/hermes}/.hermes:/home/hermes/.hermes
+      - ${HERMES_DATA_DIR:-/home/hermes}/openknowledge:/home/hermes/openknowledge
+      - ${HERMES_DATA_DIR:-/home/hermes}/projects:/home/hermes/projects
+      # Helper scripts the agent wrote for itself and refers to by absolute
+      # path, e.g. the git SSH wrapper that openknowledge's core.sshCommand
+      # points at. Not on PATH in the container.
+      - ${HERMES_DATA_DIR:-/home/hermes}/.local/bin:/home/hermes/.local/bin
+      # Mail accounts for himalaya; passwords come from the secrets via environment.
+      - ${HERMES_DATA_DIR:-/home/hermes}/.config/himalaya:/opt/data/.config/himalaya:ro
+
+  signal:
+    # Optional: runs only when COMPOSE_PROFILES in instance/.env contains
+    # "signal". Official signal-cli image.
+    # Never run a version older than the one that last wrote the data.
+    image: ghcr.io/asamk/signal-cli:0.14.5
+    container_name: hermes-signal
+    profiles: ["signal"]
+    logging: *logging
+    restart: unless-stopped
+    # Same owner as the data.
+    user: "${HERMES_UID:-1000}:${HERMES_GID:-1000}"
+    # Host networking: the gateway reaches the daemon on 127.0.0.1:8080.
+    network_mode: host
+    environment:
+      HOME: /tmp
+    volumes:
+      # Signal account registration and keys. Losing it means re-linking.
+      - ${HERMES_DATA_DIR:-/home/hermes}/.local/share/signal-cli:/var/lib/signal-cli
+    command: ["--account", "${SIGNAL_ACCOUNT:-}", "daemon", "--http", "127.0.0.1:8080"]
+
+  caddy:
+    image: caddy:2.11
+    container_name: hermes-caddy
+    logging: *logging
+    restart: unless-stopped
+    # Host networking: binds 80/443 and reaches the Webapp on 127.0.0.1:9120.
+    # The Webapp trusts forwarded headers only from loopback, so a bridge
+    # network would need extra trusted-proxy configuration.
+    network_mode: host
+    environment:
+      HERMES_DOMAIN: ${HERMES_DOMAIN:?set it in instance/.env}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates. Losing this volume only means they are issued again.
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:
+
+secrets:
+  age_key:
+    file: ${SOPS_AGE_KEY_FILE:-/etc/hermes/credentials/age.key}

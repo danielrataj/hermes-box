@@ -1,0 +1,12 @@
+# Installed by ./install.sh as /etc/systemd/system/hermes-backup.timer
+
+[Unit]
+Description=Daily Hermes state backup
+
+[Timer]
+# 03:30 Prague winter time; before the morning cron jobs, off the full hour.
+OnCalendar=*-*-* 02:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

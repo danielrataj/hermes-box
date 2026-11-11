@@ -1,0 +1,11 @@
+# Template; ./install.sh fills in @REPO_DIR@ and installs it as
+# /etc/systemd/system/hermes-monitor.service
+# Started by hermes-monitor.timer and by a failed hermes-backup.service.
+
+[Unit]
+Description=Hermes health check and alert
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=@REPO_DIR@/monitor/hermes-monitor.sh
