@@ -3,10 +3,10 @@
 # something breaks (or a different thing breaks), one when all is well again.
 # Run by hermes-monitor.timer every 10 minutes and right after a failed backup.
 #
-# Messages go to the journal (journalctl -u hermes-monitor) and, when
-# ALERT_SIGNAL_RECIPIENT is set in instance/.env, to that Signal number through the
-# local signal-cli daemon. If Signal itself is down that message cannot be
-# delivered; an external uptime check of the public address covers that case.
+# Messages go to the journal (journalctl -u hermes-monitor) and to the
+# installation's own instance/notify.sh, if there is one (monitor/notify.sh).
+# A channel that runs on this server cannot report that the server is down; an
+# external uptime check of the public address covers that case.
 
 set -uo pipefail
 

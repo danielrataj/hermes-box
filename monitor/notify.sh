@@ -1,19 +1,16 @@
 # shellcheck shell=bash
-# Sourced by the monitor and deploy scripts; expects REPO_DIR and env_get.
+# Sourced by the monitor and deploy scripts; expects REPO_DIR.
 #
-# notify <text>: write the text to stdout (the journal) and, when
-# ALERT_SIGNAL_RECIPIENT is set in instance/.env, send it to that Signal number through
-# the local signal-cli daemon. Never fails the caller.
+# notify <text>: write the text to stdout (the journal) and, when the
+# installation has an executable instance/notify.sh, hand it the text as its
+# only argument: that script delivers it wherever this installation wants its
+# alerts (a messenger, mail, a webhook). Never fails the caller.
 
 notify() {
-  local recipient
+  local hook="$REPO_DIR/instance/notify.sh"
   echo "$1"
-  recipient="$(env_get ALERT_SIGNAL_RECIPIENT)"
-  [ -n "$recipient" ] || return 0
-  jq -n --arg to "$recipient" --arg text "$1" \
-      '{jsonrpc: "2.0", id: 1, method: "send", params: {recipient: [$to], message: $text}}' |
-    curl -s --max-time 30 -o /dev/null -H 'Content-Type: application/json' \
-      -d @- http://127.0.0.1:8080/api/v1/rpc ||
-    echo "notify: could not send the Signal message"
+  [ -x "$hook" ] || return 0
+  REPO_DIR="$REPO_DIR" timeout 60 "$hook" "$1" >/dev/null 2>&1 ||
+    echo "notify: instance/notify.sh could not deliver the message"
   return 0
 }

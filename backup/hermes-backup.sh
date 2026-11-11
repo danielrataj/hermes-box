@@ -7,10 +7,11 @@
 # `restic copy` to a second repository.
 #
 # What is saved: the Hermes state (config, sessions, cron, skills, profiles),
-# Signal registration, openknowledge, projects, tool configuration and this
-# repository including instance/ (settings and encrypted secrets). Everything Hermes can
-# download or rebuild is left out. Not saved: the age key; keep a copy of a
-# key that can decrypt instance/secrets/ somewhere else.
+# openknowledge, projects, tool configuration, this repository including
+# instance/ (settings and encrypted secrets), and whatever BACKUP_EXTRA_PATHS
+# in instance/.env names. Everything Hermes can download or rebuild is left
+# out. Not saved: the age key; keep a copy of a key that can decrypt
+# instance/secrets/ somewhere else.
 #
 # The repository password is RESTIC_PASSWORD in instance/secrets/backup.enc.yaml,
 # decrypted with the server's age key each run.
@@ -48,7 +49,14 @@ RESTIC_IMAGE="${RESTIC_IMAGE:-restic/restic:0.18.1}"
 MIN_FREE_KB=$((3 * 1024 * 1024))
 
 # Relative to $SRC.
-INCLUDE=(.hermes .local/share/signal-cli .local/bin .config .ssh openknowledge projects)
+INCLUDE=(.hermes .local/bin .config .ssh openknowledge projects)
+# The installation's own additions: BACKUP_EXTRA_PATHS in instance/.env,
+# separated by spaces, relative to $SRC as well (state of its own containers).
+read -r -a extra <<< "$(env_get BACKUP_EXTRA_PATHS)"
+for p in ${extra[@]+"${extra[@]}"}; do
+  case "$p" in /*|*..*) echo "backup: BACKUP_EXTRA_PATHS takes paths inside $SRC, not $p" >&2; exit 1 ;; esac
+  INCLUDE+=("$p")
+done
 # Rebuildable or downloadable; relative to $SRC.
 SKIP=(.hermes/hermes-agent .hermes/cache .hermes/tools .hermes/installs
       .hermes/node .hermes/venvs .hermes/state-snapshots)

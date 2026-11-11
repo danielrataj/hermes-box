@@ -7,25 +7,25 @@
 #   3. creates the first encrypted secrets (including the backup password)
 #   4. lets Hermes' own wizard pick the model and provider
 #   5. sets up the sign-in for the Webapp
-#   6. optionally links a Signal account (QR code)
-#   7. installs the services and starts everything (./install.sh)
+#   6. installs the services and starts everything (./install.sh)
 #
-# Safe to run again: finished steps are skipped. An existing installation is
-# updated with ./install.sh, not with this script.
+# Safe to run again: finished steps are skipped, so a later run adds what was
+# skipped the first time (the model, the sign-in) and restarts the
+# stack if it changed anything. Everything else about an existing installation
+# is updated with ./install.sh.
 #
 #   ./setup.sh             interactive
-#   ./setup.sh --no-start  everything except step 7
+#   ./setup.sh --no-start  everything except step 6
 #
 # Every question can be answered in advance through the environment, which
-# also allows an unattended setup (steps 4 and 6 need a terminal and are
-# skipped without one):
+# also allows an unattended setup (step 4 needs a terminal and is skipped
+# without one):
 #
 #   SETUP_DOMAIN=agent.example.com      public host name of the Webapp
 #   SETUP_DATA_DIR=/home/hermes         where all state lives
 #   SETUP_MODEL=wizard|skip             run Hermes' model wizard
 #   SETUP_WEBAPP_LOGIN=password|nous|skip
 #   SETUP_WEBAPP_USER=admin  SETUP_WEBAPP_PASSWORD=...
-#   SETUP_SIGNAL=yes|no
 #   SETUP_AUTO_DEPLOY=yes|no
 
 set -euo pipefail
@@ -128,10 +128,17 @@ RUN_GID="$(env_get HERMES_GID)";       RUN_GID="${RUN_GID:-1000}"
 KEY_FILE="$(env_get SOPS_AGE_KEY_FILE)"; KEY_FILE="${KEY_FILE:-/etc/hermes/credentials/age.key}"
 note "data: $DATA_DIR"
 
+# A run on a server that is already set up only adds what is still missing.
+existing=0
+changed=0
 if [ -f "$DATA_DIR/.hermes/config.yaml" ] && [ -f instance/secrets/hermes.enc.yaml ] &&
    systemctl is-enabled --quiet hermes-docker.service 2>/dev/null; then
-  die "this server is already set up; use ./install.sh to update it"
+  existing=1
+  note "this server is already set up; only the steps skipped so far are offered"
 fi
+# Hermes writes the chosen model as a top-level "model:" entry. The file alone
+# says nothing: this script creates it even when the wizard is skipped.
+model_set() { grep -Eqs '^model:' "$DATA_DIR/.hermes/config.yaml"; }
 
 # ── 2. Image, user, directories, age key ─────────────────────────────────────
 say "Preparing the server (the first run downloads several GB)"
@@ -178,13 +185,14 @@ fi
 
 # ── 4. Model and provider (Hermes' own wizard) ───────────────────────────────
 say "Model and provider"
-if [ -f "$DATA_DIR/.hermes/config.yaml" ]; then
-  note "Hermes is already configured in $DATA_DIR/.hermes"
+if model_set; then
+  note "a model is already configured in $DATA_DIR/.hermes/config.yaml"
 elif [ "$interactive" -eq 1 ] && [ "$(ask SETUP_MODEL "Run Hermes' model wizard now? (wizard/skip)" wizard)" = wizard ]; then
   note "Hermes' wizard follows; pick a provider and a model."
-  HERMES_TTY=1 HERMES_NET=host hermes setup model </dev/tty || note "the wizard did not finish; repeat it later (see README)"
+  HERMES_TTY=1 HERMES_NET=host hermes setup model </dev/tty || note "the wizard did not finish; repeat it later (see README, Model and provider)"
+  ! model_set || changed=1
 else
-  note "skipped; the agent will not answer until a model is configured (see README)"
+  note "skipped; the agent will not answer until a model is configured (see README, Model and provider)"
 fi
 # Make sure the configuration file exists; install.sh fills in the rest.
 [ -f "$DATA_DIR/.hermes/config.yaml" ] || hermes_quiet config set webapp.enabled true ||
@@ -222,6 +230,7 @@ else
       hermes_quiet config set dashboard.basic_auth.password_hash "$hash"
       hermes_quiet config set dashboard.basic_auth.secret "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
       note "sign in at https://$DOMAIN as '$user' with that password"
+      changed=1
       ;;
     nous)
       [ "$interactive" -eq 1 ] || die "the Nous sign-in needs a terminal; run ./setup.sh interactively"
@@ -229,6 +238,7 @@ else
       note "log in to Nous Portal, then this server is registered as your dashboard"
       HERMES_TTY=1 HERMES_NET=host hermes portal </dev/tty || die "the Nous login did not finish"
       HERMES_TTY=1 HERMES_NET=host hermes dashboard register </dev/tty || die "registering with Nous Portal failed"
+      changed=1
       ;;
     *)
       note "skipped: without a sign-in Hermes will not serve the Webapp on a public address"
@@ -236,49 +246,7 @@ else
   esac
 fi
 
-# ── 6. Signal (optional) ─────────────────────────────────────────────────────
-say "Signal"
-signal_dir="$DATA_DIR/.local/share/signal-cli"
-signal_image="$(sed -n 's/^ *image: *\(ghcr\.io\/asamk\/signal-cli[^ ]*\).*/\1/p' compose.yaml | head -n1)"
-if [ -n "$(env_get SIGNAL_ACCOUNT)" ]; then
-  note "already linked: $(env_get SIGNAL_ACCOUNT)"
-elif [ "$interactive" -eq 0 ] && [ "${SETUP_SIGNAL:-no}" != no ]; then
-  note "linking Signal needs a terminal (a QR code has to be scanned); run ./setup.sh interactively later"
-elif yes_no SETUP_SIGNAL "Link a Signal account, so that you can talk to the agent there?" no; then
-  note "On your phone: Signal > Settings > Linked devices > Link new device, then scan:"
-  result="$(mktemp)"
-  # signal-cli prints the link address, waits for the scan, then the number.
-  docker run --rm -u "$RUN_UID:$RUN_GID" -e HOME=/tmp -v "$signal_dir:/var/lib/signal-cli" \
-      "$signal_image" link -n "Hermes ($DOMAIN)" 2>&1 |
-    while IFS= read -r line; do
-      case "$line" in
-        sgnl://*|tsdevice:*)
-          printf '%s' "$line" | docker run --rm -i --network none --entrypoint /opt/hermes/.venv/bin/python \
-            "$IMAGE" -c 'import sys, qrcode; q = qrcode.QRCode(border=2); q.add_data(sys.stdin.read().strip()); q.print_ascii(invert=True)'
-          ;;
-        *Associated\ with*) printf '%s' "$line" | grep -o '+[0-9]\{6,\}' | head -n1 > "$result" ;;
-        *) printf '    %s\n' "$line" ;;
-      esac
-    done || true
-  number="$(cat "$result")"; rm -f "$result"
-  [ -n "$number" ] || die "Signal was not linked; run ./setup.sh again to retry"
-  env_set COMPOSE_PROFILES signal
-  env_set SIGNAL_ACCOUNT "$number"
-  [ -n "$(env_get ALERT_SIGNAL_RECIPIENT)" ] || env_set ALERT_SIGNAL_RECIPIENT "$number"
-  # Hermes' side: where the daemon is, and who may talk to the agent. As a
-  # linked device of your own number you write to it in "Note to Self".
-  hermes_env="$DATA_DIR/.hermes/.env"
-  for pair in "SIGNAL_HTTP_URL=http://127.0.0.1:8080" "SIGNAL_ACCOUNT=$number" \
-              "SIGNAL_ALLOWED_USERS=$number" "SIGNAL_HOME_CHANNEL=$number"; do
-    grep -qs "^${pair%%=*}=" "$hermes_env" ||
-      setpriv --reuid="$RUN_UID" --regid="$RUN_GID" --clear-groups sh -c "umask 077; printf '%s\n' '$pair' >> '$hermes_env'"
-  done
-  note "linked $number; write to the agent in Signal's Note to Self"
-else
-  note "skipped; run ./setup.sh again whenever you want to add it"
-fi
-
-# ── 7. Start ─────────────────────────────────────────────────────────────────
+# ── 6. Start ─────────────────────────────────────────────────────────────────
 # Only a git checkout can follow its remote; an installation from a published
 # image is updated by extracting a newer image (see README).
 if [ -d .git ] && [ -z "$(env_get AUTO_DEPLOY)" ] && yes_no SETUP_AUTO_DEPLOY "Deploy new commits from git automatically?" no; then
@@ -291,11 +259,18 @@ if [ "$start" -eq 0 ]; then
 fi
 
 say "Installing the services and starting"
-./install.sh
-sleep 30
-note "running the first backup"
-systemctl start hermes-backup.service || note "the first backup failed; see journalctl -u hermes-backup"
-./check.sh || note "some checks fail right after a first start; run ./check.sh again in a few minutes"
+if [ "$existing" -eq 1 ] && [ "$changed" -eq 1 ]; then
+  # A running stack reads its configuration only at start.
+  ./install.sh --restart
+else
+  ./install.sh
+fi
+if [ "$existing" -eq 0 ] || [ "$changed" -eq 1 ]; then sleep 30; fi
+if [ "$existing" -eq 0 ]; then
+  note "running the first backup"
+  systemctl start hermes-backup.service || note "the first backup failed; see journalctl -u hermes-backup"
+fi
+./check.sh || note "some checks fail right after a start; run ./check.sh again in a few minutes"
 
 say "Done"
 note "Webapp:  https://$DOMAIN"

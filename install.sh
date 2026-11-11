@@ -80,14 +80,16 @@ fi
 ln -sfn instance/.env .env
 
 [ -n "$(env_get HERMES_DOMAIN)" ] || die "HERMES_DOMAIN is empty in instance/.env"
-# Signal is optional: it runs when COMPOSE_PROFILES contains "signal".
-signal=0
-case ",$(env_get COMPOSE_PROFILES)," in *,signal,*) signal=1 ;; esac
-if [ "$signal" -eq 1 ] && [ -z "$(env_get SIGNAL_ACCOUNT)" ]; then
-  die "COMPOSE_PROFILES enables Signal but SIGNAL_ACCOUNT is empty in instance/.env"
+# An installation may run containers of its own next to these: Compose merges
+# compose.override.yaml into compose.yaml by itself, so instance/compose.yaml
+# only has to be reachable under that name.
+if [ -e compose.override.yaml ] && [ ! -L compose.override.yaml ]; then
+  die "compose.override.yaml is a regular file; an installation's own services belong in instance/compose.yaml"
 fi
-if [ "$signal" -eq 0 ] && [ -n "$(env_get SIGNAL_ACCOUNT)" ]; then
-  die "SIGNAL_ACCOUNT is set but Signal is off; add COMPOSE_PROFILES=signal to instance/.env (or clear SIGNAL_ACCOUNT)"
+if [ -f instance/compose.yaml ]; then
+  ln -sfn instance/compose.yaml compose.override.yaml
+else
+  rm -f compose.override.yaml
 fi
 
 DATA_DIR="$(env_get HERMES_DATA_DIR)";   DATA_DIR="${DATA_DIR:-/home/hermes}"
@@ -125,10 +127,19 @@ if [ ! -d "$DATA_DIR" ]; then
   install -d -m 750 -o "$RUN_UID" -g "$RUN_GID" "$DATA_DIR"
   note "created $DATA_DIR"
 fi
-for dir in .hermes openknowledge projects .config/himalaya .local/bin .local/share/signal-cli; do
+# .hermes/.config/himalaya is where compose mounts the mail configuration
+# inside the data mount; Docker would create a missing mount point as root.
+for dir in .hermes openknowledge projects .config/himalaya .local/bin .hermes/.config/himalaya; do
   if [ ! -d "$DATA_DIR/$dir" ]; then
     as_owner mkdir -p "$DATA_DIR/$dir"
     note "created $DATA_DIR/$dir"
+  fi
+done
+# Earlier versions left that mount point to Docker; hand it back to the owner.
+for dir in .hermes/.config .hermes/.config/himalaya; do
+  if [ "$(stat -c %u "$DATA_DIR/$dir")" != "$RUN_UID" ] && ! mountpoint -q "$DATA_DIR/$dir"; then
+    chown "$RUN_UID:$RUN_GID" "$DATA_DIR/$dir"
+    note "changed the owner of $DATA_DIR/$dir to $RUN_UID"
   fi
 done
 # The container's ~ is the .hermes directory itself; this keeps `~/.hermes/...`
@@ -154,8 +165,8 @@ if [ "$build" -eq 1 ]; then
     say "Pulling the image $IMAGE (first run downloads several GB)"
     docker pull --quiet "$IMAGE" >/dev/null
   fi
-  docker compose pull --quiet caddy
-  [ "$signal" -eq 0 ] || docker compose pull --quiet signal
+  # Caddy and whatever instance/compose.yaml adds; the gateway is done above.
+  docker compose pull --quiet --ignore-buildable
 fi
 
 # ── 4. Secrets ───────────────────────────────────────────────────────────────
@@ -229,6 +240,21 @@ if [ -f "$DATA_DIR/.hermes/config.yaml" ]; then
     note "set terminal.home_mode = real"; config_changed=1
   fi
   [ "$config_changed" -eq 1 ] || note "already set"
+  # The Hermes image leaves pnpm to be installed into the data directory
+  # (<data>/.hermes/tools) and complains on every start until it is there:
+  # "install out of sync (pnpm: not installed or outdated)". Needs the network.
+  hermes_pm() {  # with the network and with stderr, unlike hermes_config
+    docker run --rm --init --entrypoint /opt/hermes/bin/hermes \
+      -u "$RUN_UID:$RUN_GID" -e HERMES_HOME=/opt/data -e HOME=/opt/data \
+      -v "$DATA_DIR/.hermes:/opt/data" "$IMAGE" "$@" 2>&1
+  }
+  case "$(hermes_pm config get webapp.enabled || true)" in *'out of sync (pnpm'*)
+    if hermes_pm pm install pnpm >/dev/null; then
+      note "installed pnpm into $DATA_DIR/.hermes/tools"
+    else
+      note "could not install pnpm; Hermes will keep warning that the install is out of sync"
+    fi ;;
+  esac
 else
   note "no config.yaml in $DATA_DIR/.hermes yet: this is an empty data directory."
   note "Restore the data first, or run ./setup.sh for a first-time setup."
