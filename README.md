@@ -1,8 +1,8 @@
 # Hermes Agent in Docker
 
 Runs [Hermes Agent](https://github.com/NousResearch/hermes-agent) on a server
-in Docker: the agent with Signal and cron, the Webapp (Hermes Desktop in the
-browser, including Bots) on your own domain, and a daily backup.
+in Docker: the agent with cron, the Webapp (Hermes Desktop in the browser,
+including Bots) on your own domain, and a daily backup.
 
 The host needs only Docker and one private key; no third-party service for
 secrets is required.
@@ -12,13 +12,31 @@ The solution is split into two parts:
 - **this repository** – the same for every installation, contains nothing
   personal,
 - **the `instance/` directory** – the settings and encrypted secrets of one
-  installation. It is not part of this repository; a template and description
-  are in [`instance.example/`](instance.example/README.md).
+  installation, and anything else only that installation runs: containers of
+  its own, checks, the way alerts are delivered (see
+  [Your own additions](#your-own-additions)). It is not part of this
+  repository; a template and description are in
+  [`instance.example/`](instance.example/README.md).
 
 ## Installation
 
 You need a server with Linux (x86_64) and Docker, a domain pointing at its
 address, and ports 80 and 443 open. Everything is run as root.
+
+Size: the image is about 5 GB and a fresh installation takes about 9 GB of
+disk; an update needs room for a second image for a while, so plan for 40 GB
+or more. The agent's container uses about 250 MB of memory when idle. 2 GB of
+RAM is a sensible minimum; with 1 GB it runs only with swap.
+
+If Docker is missing, on Debian and Ubuntu:
+
+```bash
+curl -fsSL https://get.docker.com | sh
+```
+
+To try it out without a domain of your own, use `<address>.sslip.io` as the
+host name, for example `203.0.113.7.sslip.io`: it resolves to that address and
+gets a certificate like any other name.
 
 ### New installation
 
@@ -48,18 +66,41 @@ The wizard asks a few questions and performs the whole initial setup:
 3. the first encrypted secrets, including a random backup password,
 4. model and provider: runs Hermes's own wizard,
 5. Webapp login: a user name and password, or a Nous Portal account,
-6. optionally Signal: shows a QR code that you scan with your phone
-   (Settings → Linked devices); you then write to the agent in Note to Self,
-7. installation of the services, start, first backup and check.
+6. installation of the services, start, first backup and check.
 
-It can be run again; finished steps are skipped. This is how Signal or the
-model can be added later. The questions can be answered in advance with the
-`SETUP_*` variables (see the header of `setup.sh`), in which case it runs
-without prompting; steps 4 and 6 need a terminal.
+It can be run again, also on a server that is already running; finished
+steps are skipped. This is how the model or the Webapp login is added later;
+the stack is restarted when something was added. The questions can be
+answered in advance with the `SETUP_*` variables (see the header of
+`setup.sh`), in which case it runs without prompting; step 4 needs a terminal
+and is skipped without one.
 
 After the installation, store the private key
 (`/etc/hermes/credentials/age.key`) and the `instance/` directory off the
 server, ideally as a private git repository.
+
+### Model and provider
+
+Until a model is chosen the agent does not answer; `./check.sh` says so in a
+`warn` line. An installation that skipped step 4 (an unattended one always
+does) gets its model by running the wizard again in a terminal:
+
+```bash
+cd /opt/hermes-box && ./setup.sh
+```
+
+The same without the wizard around it, for example to change the model later:
+
+```bash
+docker exec -it -u 1000:1000 -e HOME=/opt/data hermes hermes setup model
+```
+
+```bash
+systemctl restart hermes-docker
+```
+
+Use `hermes setup model`, not `hermes setup`: the full Hermes setup asks about
+much more than the model.
 
 ### Existing installation, restore, another server
 
@@ -84,9 +125,7 @@ Secrets).
 | --- | --- | --- |
 | `HERMES_DOMAIN` | – | public address of the Webapp; DNS must point at the server |
 | `SOPS_AGE_KEY_FILE` | `/etc/hermes/credentials/age.key` | the server's private key |
-| `COMPOSE_PROFILES` | empty | `signal` enables the Signal container |
-| `SIGNAL_ACCOUNT` | empty | Signal account number, international format |
-| `ALERT_SIGNAL_RECIPIENT` | empty | number that receives problem alerts |
+| `BACKUP_EXTRA_PATHS` | empty | further paths in the data directory to back up, separated by spaces |
 | `AUTO_DEPLOY` | off | `true`: the server deploys new commits by itself |
 | `HERMES_DATA_DIR` | `/home/hermes` | where all state lives |
 | `HERMES_UID`, `HERMES_GID` | `1000` | owner of the data |
@@ -111,11 +150,12 @@ itself (`deploy/hermes-deploy.sh`):
    if needed builds the image and updates the units,
 2. it restarts the stack only when something that runs in the containers has
    changed (`compose.yaml`, `Dockerfile`, `docker/`, `caddy/`, `instance/.env`,
-   `instance/secrets/`); it waits until no cron job is about to start,
+   `instance/compose.yaml`, `instance/secrets/`); it waits until no cron job
+   is about to start,
 3. it runs `check.sh`; if that fails, it rolls back to the previous commit and
    image,
 4. it writes the result to the journal (`journalctl -u hermes-deploy`) and
-   sends it over Signal.
+   hands it to `instance/notify.sh`, if there is one.
 
 A commit whose deployment failed is not retried; fix it with a new commit.
 To retry the same one: `rm /var/lib/hermes-deploy/failed-commit`.
@@ -138,17 +178,16 @@ Protect the branch on GitHub and keep two-factor authentication on the account.
 git pull --ff-only && ./install.sh --restart
 ```
 
-A restart means about a minute of downtime, including Signal and the web.
+A restart means about a minute of downtime, including the web.
 Without `--restart` only the image is built and the units are updated.
 
 ## What runs
 
-Two to three containers (Signal is optional), all with the `host` network mode:
+Two containers, both with the `host` network mode:
 
 | Container | Image | What it does | Where it listens |
 | --- | --- | --- | --- |
-| `hermes` | `ghcr.io/danielrataj/hermes-box:<version>`, or `hermes-agent-local` built from the `Dockerfile` | gateway: agent, Signal, cron, sessions, Bots; plus the Webapp and dashboard | Webapp `127.0.0.1:9120`, dashboard `127.0.0.1:9119` |
-| `hermes-signal` | `ghcr.io/asamk/signal-cli:0.14.5` | signal-cli HTTP daemon | `127.0.0.1:8080` |
+| `hermes` | `ghcr.io/danielrataj/hermes-box:<version>`, or `hermes-agent-local` built from the `Dockerfile` | gateway: agent, cron, sessions, Bots; plus the Webapp and dashboard | Webapp `127.0.0.1:9120`, dashboard `127.0.0.1:9119` |
 | `hermes-caddy` | `caddy:2.11` | TLS and reverse proxy | `80`, `443` |
 
 - The **Webapp** runs at `https://<HERMES_DOMAIN>` behind a Nous login.
@@ -165,13 +204,33 @@ The containers are started by the systemd unit `hermes-docker.service` with
 `docker compose up`. The `hermes` container has `restart: on-failure:5`, so
 Docker brings it back up after a crash.
 
+## Your own additions
+
+What only your installation needs does not belong in this repository. Put it
+in `instance/`; these four places are picked up when they exist:
+
+| In `instance/` | What it does |
+| --- | --- |
+| `compose.yaml` | more containers, or changes to the ones here. `install.sh` links it as `compose.override.yaml`, which Compose merges into `compose.yaml`. Paths are relative to the repository directory; variables come from `instance/.env`. Apply with `./install.sh --restart`. |
+| `check.d/*.sh` | one more line in `./check.sh` per script, named after the file: it passes when the script exits 0, and the last line the script printed is shown when it fails. The scripts get `REPO_DIR` and `DATA_DIR`. |
+| `notify.sh` | delivery of alerts. Must be executable; gets the message as its only argument. Called by the monitor and by the automatic deployment. |
+| `BACKUP_EXTRA_PATHS` in `.env` | paths inside the data directory to add to the backup, for example the state of your own container. |
+
+A messenger daemon the gateway talks to is a typical case: its container goes
+into `instance/compose.yaml`, a check that it answers into `instance/check.d/`,
+its data into `BACKUP_EXTRA_PATHS`, and `instance/notify.sh` can send the
+alerts through it. Create the directory for its data yourself, owned by
+`HERMES_UID`; Docker would create a missing one as root.
+
+Everything in `instance/` runs as root on the server, like this repository.
+
 ## Files
 
 | File | Purpose |
 | --- | --- |
 | `setup.sh` | first-installation wizard |
 | `install.sh` | installation and deployment of changes |
-| `compose.yaml` | definition of all three containers |
+| `compose.yaml` | definition of the containers |
 | `Dockerfile` | the official Hermes image + `sops`, `age`, `uv` and `himalaya`; also carries the files in this table |
 | `docker/extract.sh` | extracts the files from the image onto the server (`hermes-box-extract`) |
 | `release.env` | only for an installation from the image: which image is running |
@@ -198,7 +257,6 @@ All state is in `HERMES_DATA_DIR`. The image is stateless.
 | `projects` | projects | `/home/hermes/projects` |
 | `.config/himalaya` | mail settings (the passwords are in the secrets) | `/opt/data/.config/himalaya` |
 | `.local/bin` | the agent's helper scripts, e.g. an SSH wrapper for git | `/home/hermes/.local/bin` |
-| `.local/share/signal-cli` | Signal registration and keys | only in `hermes-signal` |
 | `backups` | backups | not mounted |
 
 Outside the data directory:
@@ -321,8 +379,8 @@ already seen need to be changed at their source.
 
 ## Common tasks
 
-Check everything at once (services, containers, Signal, web, certificate,
-backup, disk space); it exits with an error when something is wrong:
+Check everything at once (services, containers, web, certificate, backup,
+disk space, your own checks); it exits with an error when something is wrong:
 
 ```bash
 ./check.sh
@@ -357,17 +415,20 @@ The `hermes` command inside the container, as the agent's user:
 docker exec -it -u 1000:1000 -e HOME=/opt/data hermes hermes --help
 ```
 
+Without a subcommand, and without a model, `hermes` offers to run its full
+setup; decline and see [Model and provider](#model-and-provider).
+
 ## Monitoring
 
 `hermes-monitor.timer` runs `check.sh` every 10 minutes, and immediately after
 a failed backup. When the result changes, it writes that to the journal
-(`journalctl -u hermes-monitor`) and sends a message over Signal to
-`ALERT_SIGNAL_RECIPIENT`: one when something breaks, and one when everything is
-fine again.
+(`journalctl -u hermes-monitor`): one message when something breaks, and one
+when everything is fine again.
 
-The message goes out through the local signal-cli. When Signal or the whole
-server is down, nothing arrives; only an external check of the public address
-covers that (UptimeRobot and the like).
+To be told somewhere else, add `instance/notify.sh` (see
+[Your own additions](#your-own-additions)). Whatever that script uses, it runs
+on this server: when the whole server is down, nothing arrives; only an
+external check of the public address covers that (UptimeRobot and the like).
 
 ## Updating
 
@@ -418,8 +479,6 @@ git tag v1.2.3 && git push origin v1.2.3
 CI publishes `ghcr.io/danielrataj/hermes-box:1.2.3` and moves `:1.2` and `:1`.
 A tag with a suffix (`v1.2.3-rc.1`) publishes only itself.
 
-signal-cli never goes back to a version older than the one that last wrote the
-data. This also applies to going back to an older image version.
 
 ## Backup
 
@@ -427,7 +486,7 @@ data. This also applies to going back to an older image version.
 
 1. it copies all SQLite databases through the backup API (consistent even while
    running),
-2. it stores them, together with the Hermes state, the Signal registration,
+2. it stores them, together with the Hermes state, `BACKUP_EXTRA_PATHS`,
    `openknowledge`, `projects`, the tool configuration and this repository
    including `instance/` and the encrypted secrets, in the restic repository
    `<data>/backups/restic-repo`,
@@ -490,5 +549,5 @@ above.
 
 ## Licence
 
-[MIT](LICENSE). Hermes Agent itself, Signal CLI, Caddy and the other tools used
-have their own licences.
+[MIT](LICENSE). Hermes Agent itself, Caddy and the other tools used have their
+own licences.

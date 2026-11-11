@@ -7,7 +7,7 @@ Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
 # A host install of the same services must never run next to this one.
-Conflicts=hermes-gateway.service hermes-dashboard.service caddy.service signal-cli.service
+Conflicts=hermes-gateway.service hermes-dashboard.service caddy.service
 # Never start on an empty data directory: if its volume is not mounted, Docker
 # would create empty directories and the agent would boot with blank state.
 RequiresMountsFor=@DATA_DIR@

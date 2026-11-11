@@ -9,7 +9,7 @@
 #     -> validate, build the image if needed, update systemd units (install.sh)
 #     -> restart the stack only if what runs in the containers changed
 #     -> run check.sh; if it fails, go back to the previous commit and image
-#     -> report the result (journal, and Signal if ALERT_SIGNAL_RECIPIENT is set)
+#     -> report the result (journal, and instance/notify.sh if there is one)
 #
 # A commit that failed is not tried again; push a new one.
 # Pause the automation with:  touch deploy/PAUSE   (remove the file to resume)
@@ -27,7 +27,7 @@ STATE_DIR=/var/lib/hermes-deploy
 FAILED="$STATE_DIR/failed-commit"   # do not retry this one
 DEPLOYING=/run/hermes-deploying     # tells the monitor to stay quiet
 # Changes under these paths alter what runs in the containers.
-RESTART_PATHS='^(compose\.yaml|Dockerfile|docker/|caddy/|instance/(\.env|secrets/))'
+RESTART_PATHS='^(compose\.yaml|Dockerfile|docker/|caddy/|instance/(\.env|compose\.yaml|secrets/))'
 BUILD_PATHS='^(Dockerfile|docker/)'
 
 host="$(hostname)"
@@ -45,7 +45,7 @@ restart_and_check() {
   local i
   for i in $(seq 1 100); do webapp_up && break; sleep 3; done
   webapp_up || return 1
-  sleep 20   # let the gateway connect to Signal
+  sleep 20   # let the gateway connect to its platforms
   "$REPO_DIR/check.sh" --quiet
 }
 

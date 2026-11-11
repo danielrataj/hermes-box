@@ -3,6 +3,8 @@
 # its own. /.env is a symlink to instance/.env made by install.sh.
 /instance/
 /.env
+# A symlink to instance/compose.yaml, made by install.sh.
+/compose.override.yaml
 .DS_Store
 # Created on a server to pause automatic deployment.
 deploy/PAUSE

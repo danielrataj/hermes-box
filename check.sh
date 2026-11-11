@@ -17,6 +17,8 @@ failed=0
 
 ok()   { [ "$quiet" -eq 1 ] || printf 'ok    %s\n' "$1"; }
 fail() { printf 'FAIL  %s\n' "$1"; failed=1; }
+# Worth knowing, but not a failure: no alert, exit code unchanged.
+warn() { [ "$quiet" -eq 1 ] || printf 'warn  %s\n' "$1"; }
 # check <name> <command...>: passes when the command succeeds
 check() { local name="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$name"; else fail "$name"; fi; }
 
@@ -33,11 +35,7 @@ done
 # ── Services ─────────────────────────────────────────────────────────────────
 check "hermes-docker.service is active" systemctl is-active --quiet hermes-docker.service
 check "hermes-backup.timer is active"   systemctl is-active --quiet hermes-backup.timer
-signal=0
-case ",$(env_get COMPOSE_PROFILES)," in *,signal,*) signal=1 ;; esac
-containers="hermes hermes-caddy"
-[ "$signal" -eq 0 ] || containers="hermes hermes-signal hermes-caddy"
-for name in $containers; do
+for name in hermes hermes-caddy; do
   state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
   if [ "$state" = running ]; then ok "container $name is running"; else fail "container $name is $state"; fi
 done
@@ -51,14 +49,11 @@ if [ "$restarts" -eq 0 ]; then ok "container hermes has not crashed"
 else fail "container hermes was restarted ${restarts}x after a crash"; fi
 
 # ── Agent ────────────────────────────────────────────────────────────────────
+if grep -Eqs '^model:' "$DATA_DIR/.hermes/config.yaml"; then ok "a model is configured"
+else warn "no model is configured: the agent will not answer (see README, Model and provider)"; fi
 check "Webapp answers on 127.0.0.1:9120" is_up http://127.0.0.1:9120/
-if [ "$signal" -eq 1 ]; then
-  check "signal-cli daemon answers" is_up http://127.0.0.1:8080/api/v1/check
-  state="$(jq -r '(.platforms // .) | .signal.state // "unknown"' "$DATA_DIR/.hermes/gateway_state.json" 2>/dev/null || echo unknown)"
-  if [ "$state" = connected ]; then ok "gateway is connected to Signal"; else fail "gateway Signal state: $state"; fi
-fi
-exposed="$(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ':(9119|9120|8080)$' | grep -v -E '^(127\.|\[::1\]|\[::ffff:127\.)' | tr '\n' ' ')"
-if [ -z "$exposed" ]; then ok "dashboard, Webapp and Signal listen on loopback only"
+exposed="$(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ':(9119|9120)$' | grep -v -E '^(127\.|\[::1\]|\[::ffff:127\.)' | tr '\n' ' ')"
+if [ -z "$exposed" ]; then ok "dashboard and Webapp listen on loopback only"
 else fail "listening on a public address: $exposed"; fi
 
 # ── Public ───────────────────────────────────────────────────────────────────
@@ -68,7 +63,7 @@ if [ -n "$DOMAIN" ]; then
     echo | openssl s_client -connect "$DOMAIN:443" -servername "$DOMAIN" 2>/dev/null |
       openssl x509 -noout -checkend $((14 * 86400))
   }
-  check "certificate valid for 14 more days" cert_ok
+  check "certificate is valid for at least 14 more days" cert_ok
 fi
 
 # ── Backup ───────────────────────────────────────────────────────────────────
@@ -82,6 +77,16 @@ if [ -f "$stamp" ]; then
 else
   fail "no successful backup recorded yet"
 fi
+
+# ── The installation's own checks ────────────────────────────────────────────
+# Every instance/check.d/*.sh is one check, named after its file: it passes
+# when the script exits 0; the last line it printed is shown with a failure.
+for script in "$REPO_DIR"/instance/check.d/*.sh; do
+  [ -f "$script" ] || continue
+  name="$(basename "$script" .sh)"
+  if output="$(REPO_DIR="$REPO_DIR" DATA_DIR="$DATA_DIR" bash "$script" 2>&1)"; then ok "$name"
+  else fail "$name: $(printf '%s' "$output" | tail -n1)"; fi
+done
 
 [ "$quiet" -eq 1 ] || { [ "$failed" -eq 0 ] && echo "all checks passed" || echo "some checks FAILED"; }
 exit "$failed"

@@ -1,15 +1,16 @@
 # Hermes Agent on a server, in Docker.
 #
-#   gateway    the agent (Signal, cron, sessions, bots), supervised by s6
+#   gateway    the agent (cron, sessions, bots), supervised by s6
 #   Webapp     Hermes Desktop in a browser, incl. Bots; served by the gateway
 #              on 127.0.0.1:9120, published by Caddy at HERMES_DOMAIN
 #   dashboard  admin panel on 127.0.0.1:9119; not published, use an SSH tunnel
-#   signal     signal-cli HTTP daemon on 127.0.0.1:8080 (optional)
 #   caddy      TLS and reverse proxy for the Webapp
 #
 # This repository is the same for every installation. What differs lives in
 # instance/ (see instance.example/): the settings in instance/.env and the
 # encrypted secrets in instance/secrets/. `./install.sh` sets up the rest.
+# An installation adds containers of its own in instance/compose.yaml, which
+# install.sh links as compose.override.yaml; Compose merges it into this file.
 # Secrets are decrypted inside the container at start, so they never appear
 # in `docker inspect` or unencrypted on disk.
 #
@@ -40,7 +41,7 @@ services:
     container_name: hermes
     logging: *logging
     # Started by hermes-docker.service. `docker compose up` keeps running while
-    # Caddy and Signal are up, so systemd does not notice this container
+    # Caddy is up, so systemd does not notice this container
     # dying; Docker restarts it instead. Capped, so a configuration error
     # (exit 78: missing key or secrets) does not loop forever. Docker itself waits for the data
     # directory's mount (server/docker-volume.conf).
@@ -54,8 +55,8 @@ services:
       retries: 3
       start_period: 180s
 
-    # Host networking: signal-cli listens on the host's 127.0.0.1:8080, and
-    # Caddy reaches the Webapp on the host's loopback.
+    # Host networking: Caddy reaches the Webapp on the host's loopback, and the
+    # gateway reaches an installation's own daemons there.
     network_mode: host
 
     secrets:
@@ -98,26 +99,6 @@ services:
       - ${HERMES_DATA_DIR:-/home/hermes}/.local/bin:/home/hermes/.local/bin
       # Mail accounts for himalaya; passwords come from the secrets via environment.
       - ${HERMES_DATA_DIR:-/home/hermes}/.config/himalaya:/opt/data/.config/himalaya:ro
-
-  signal:
-    # Optional: runs only when COMPOSE_PROFILES in instance/.env contains
-    # "signal". Official signal-cli image.
-    # Never run a version older than the one that last wrote the data.
-    image: ghcr.io/asamk/signal-cli:0.14.5
-    container_name: hermes-signal
-    profiles: ["signal"]
-    logging: *logging
-    restart: unless-stopped
-    # Same owner as the data.
-    user: "${HERMES_UID:-1000}:${HERMES_GID:-1000}"
-    # Host networking: the gateway reaches the daemon on 127.0.0.1:8080.
-    network_mode: host
-    environment:
-      HOME: /tmp
-    volumes:
-      # Signal account registration and keys. Losing it means re-linking.
-      - ${HERMES_DATA_DIR:-/home/hermes}/.local/share/signal-cli:/var/lib/signal-cli
-    command: ["--account", "${SIGNAL_ACCOUNT:-}", "daemon", "--http", "127.0.0.1:8080"]
 
   caddy:
     image: caddy:2.11

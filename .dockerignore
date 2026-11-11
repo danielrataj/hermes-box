@@ -4,5 +4,6 @@
 .claude
 .env
 instance
+compose.override.yaml
 deploy/PAUSE
 .DS_Store
