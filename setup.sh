@@ -84,7 +84,7 @@ env_set() {
 }
 
 [ "$(id -u)" -eq 0 ] || die "run as root"
-command -v docker >/dev/null || die "Docker is not installed (https://docs.docker.com/engine/install/)"
+command -v docker >/dev/null || die "Docker is not installed (get.sh installs it, see README; or https://docs.docker.com/engine/install/)"
 
 # The few host tools check.sh and the backup use; Docker is the only thing
 # that has to be there beforehand.

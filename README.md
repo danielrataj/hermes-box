@@ -4,8 +4,9 @@ Runs [Hermes Agent](https://github.com/NousResearch/hermes-agent) on a server
 in Docker: the agent with cron, the Webapp (Hermes Desktop in the browser,
 including Bots) on your own domain, and a daily backup.
 
-The host needs only Docker and one private key; no third-party service for
-secrets is required.
+The installation is one command on an empty server. The host ends up with
+only Docker and one private key; no third-party service for secrets is
+required.
 
 The solution is split into two parts:
 
@@ -20,7 +21,7 @@ The solution is split into two parts:
 
 ## Installation
 
-You need a server with Linux (x86_64) and Docker, a domain pointing at its
+You need a server with Linux (x86_64, with systemd), a domain pointing at its
 address, and ports 80 and 443 open. Everything is run as root.
 
 Size: the image is about 5 GB and a fresh installation takes about 9 GB of
@@ -28,21 +29,35 @@ disk; an update needs room for a second image for a while, so plan for 40 GB
 or more. The agent's container uses about 250 MB of memory when idle. 2 GB of
 RAM is a sensible minimum; with 1 GB it runs only with swap.
 
-If Docker is missing, on Debian and Ubuntu:
-
-```bash
-curl -fsSL https://get.docker.com | sh
-```
-
 To try it out without a domain of your own, use `<address>.sslip.io` as the
 host name, for example `203.0.113.7.sslip.io`: it resolves to that address and
 gets a certificate like any other name.
 
 ### New installation
 
-The published image is enough; nothing is built or cloned. The first command
-extracts `compose.yaml`, the scripts and the systemd units from it into
-`/opt/hermes-box`, the second starts the wizard:
+One command, on a server with nothing installed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/danielrataj/hermes-box/master/get.sh | sudo bash
+```
+
+[`get.sh`](get.sh) installs Docker when it is missing (with Docker's own
+script, <https://get.docker.com>, which covers Debian, Ubuntu, Fedora, CentOS
+and RHEL), pulls the published image, extracts `compose.yaml`, the scripts and
+the systemd units from it into `/opt/hermes-box` and starts the wizard.
+Nothing is built or cloned. Run again on a server that is already installed,
+it only starts the wizard again.
+
+Another release or directory is chosen through the environment, and the
+wizard's answers can be given the same way, which makes the installation
+unattended:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/danielrataj/hermes-box/master/get.sh | sudo INSTALL_IMAGE=ghcr.io/danielrataj/hermes-box:1.0.0 SETUP_DOMAIN=agent.example.com bash
+```
+
+The same by hand, when Docker is already there and you would rather not pipe
+a script into a shell:
 
 ```bash
 docker run --rm -v /opt/hermes-box:/out --entrypoint hermes-box-extract ghcr.io/danielrataj/hermes-box:1
@@ -228,6 +243,7 @@ Everything in `instance/` runs as root on the server, like this repository.
 
 | File | Purpose |
 | --- | --- |
+| `get.sh` | one-command installation: Docker, the files from the image, then `setup.sh` |
 | `setup.sh` | first-installation wizard |
 | `install.sh` | installation and deployment of changes |
 | `compose.yaml` | definition of the containers |
@@ -432,8 +448,13 @@ external check of the public address covers that (UptimeRobot and the like).
 
 ## Updating
 
-A new version is a new image. Extract the files from it over the existing ones
-and deploy:
+A new version is a new image. In one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/danielrataj/hermes-box/master/get.sh | sudo bash -s -- --update
+```
+
+Or by hand: extract the files from it over the existing ones and deploy:
 
 ```bash
 docker run --rm -v /opt/hermes-box:/out --entrypoint hermes-box-extract ghcr.io/danielrataj/hermes-box:1
@@ -534,7 +555,7 @@ command. Stop `hermes-docker` before copying anything back.
 
 When the server is gone and the data disk survives:
 
-1. New server, install Docker.
+1. New server.
 2. Mount the data disk at `HERMES_DATA_DIR` and add it to `/etc/fstab`.
    With a Hetzner Volume **do not run `mkfs`** from their instructions; it
    would erase the data.
