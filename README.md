@@ -402,3 +402,8 @@ Když server zanikne a disk s daty přežije:
 4. Přesměrovat DNS na novou adresu. Caddy si certifikát vystaví sám.
 
 Když zanikne i disk s daty, data jsou pryč; viz omezení zálohy výše.
+
+## Licence
+
+[MIT](LICENSE). Hermes Agent sám, Signal CLI, Caddy a další použité nástroje
+mají vlastní licence.
