@@ -18,7 +18,7 @@
 # SQLite databases are copied through SQLite's backup API first, so the saved
 # copy is consistent even while the agent is writing.
 #
-# Restore: see README, "Obnova souborů ze zálohy".
+# Restore: see README, "Restoring files from a backup".
 
 set -euo pipefail
 

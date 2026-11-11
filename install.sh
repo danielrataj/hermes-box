@@ -169,7 +169,7 @@ if [ "$prepare" -eq 1 ]; then
 fi
 
 [ -f instance/secrets/hermes.enc.yaml ] ||
-  die "instance/secrets/hermes.enc.yaml is missing. Create it with ./sops.sh secrets/hermes.enc.yaml (one NAME: value per line); see README, Tajné údaje."
+  die "instance/secrets/hermes.enc.yaml is missing. Create it with ./sops.sh secrets/hermes.enc.yaml (one NAME: value per line); see README, Secrets."
 for file in instance/secrets/*.enc.yaml; do
   if ! tool -e SOPS_AGE_KEY_FILE=/age.key -v "$KEY_FILE:/age.key:ro" -v "$REPO_DIR/instance/secrets:/instance/secrets:ro" \
        --entrypoint sops hermes-agent-local decrypt "/$file" >/dev/null 2>&1; then
