@@ -3,7 +3,7 @@
 # agent. Asks a few questions, then:
 #
 #   1. writes instance/.env
-#   2. builds the image, creates the user, the data directories and the age key
+#   2. gets the image (pulled or built), creates the user, the data directories and the age key
 #   3. creates the first encrypted secrets (including the backup password)
 #   4. lets Hermes' own wizard pick the model and provider
 #   5. sets up the sign-in for the Webapp
@@ -63,6 +63,14 @@ yes_no() {  # <ENV_NAME> <question> <default yes|no>
 }
 
 env_get() { sed -n "s/^$1=//p" instance/.env 2>/dev/null | tail -n1; }
+# The image to run: a published one named in instance/.env or in release.env
+# (written by docker/extract.sh), else the one built here from the Dockerfile.
+image_ref() {
+  local ref
+  ref="$(env_get HERMES_BOX_IMAGE)"
+  [ -n "$ref" ] || ref="$(sed -n 's/^HERMES_BOX_IMAGE=//p' "$REPO_DIR/release.env" 2>/dev/null | tail -n1)"
+  printf '%s' "${ref:-hermes-agent-local}"
+}
 # Set KEY=value in instance/.env: replace the line (also a commented-out one) or append.
 env_set() {
   local key="$1" value="$2" file=instance/.env tmp
@@ -77,6 +85,20 @@ env_set() {
 
 [ "$(id -u)" -eq 0 ] || die "run as root"
 command -v docker >/dev/null || die "Docker is not installed (https://docs.docker.com/engine/install/)"
+
+# The few host tools check.sh and the backup use; Docker is the only thing
+# that has to be there beforehand.
+missing=""
+for tool in curl jq openssl python3; do
+  command -v "$tool" >/dev/null || missing="$missing $tool"
+done
+if [ -n "$missing" ]; then
+  command -v apt-get >/dev/null || die "not installed:$missing (install them and run ./setup.sh again)"
+  say "Installing$missing"
+  DEBIAN_FRONTEND=noninteractive apt-get update -qq
+  # shellcheck disable=SC2086  # a list of package names
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing >/dev/null
+fi
 
 # ── 1. Settings ──────────────────────────────────────────────────────────────
 say "Settings (instance/.env)"
@@ -112,14 +134,15 @@ if [ -f "$DATA_DIR/.hermes/config.yaml" ] && [ -f instance/secrets/hermes.enc.ya
 fi
 
 # ── 2. Image, user, directories, age key ─────────────────────────────────────
-say "Preparing the server (the first build downloads several GB)"
+say "Preparing the server (the first run downloads several GB)"
 ./install.sh --prepare
+IMAGE="$(image_ref)"
 
 # Tools from the image; nothing else is installed on the host.
 sops_encrypt() {  # <name>: JSON on stdin -> instance/secrets/<name>.enc.yaml
   local out="instance/secrets/$1.enc.yaml"
   docker run --rm -i --network none -e SOPS_DISABLE_VERSION_CHECK=1 \
-    -v "$REPO_DIR/instance:/work:ro" -w /work --entrypoint sops hermes-agent-local \
+    -v "$REPO_DIR/instance:/work:ro" -w /work --entrypoint sops "$IMAGE" \
     encrypt --input-type json --output-type yaml --filename-override "secrets/$1.enc.yaml" /dev/stdin > "$out.new"
   [ -s "$out.new" ] || { rm -f "$out.new"; die "could not encrypt $out"; }
   mv "$out.new" "$out"; chmod 644 "$out"
@@ -129,7 +152,7 @@ hermes() {  # run the hermes CLI on the data directory; HERMES_TTY=1 attaches th
   if [ "${HERMES_TTY:-0}" -eq 1 ]; then tty=(-it); fi
   docker run --rm ${tty[@]+"${tty[@]}"} --network "${HERMES_NET:-none}" \
     -u "$RUN_UID:$RUN_GID" -e HERMES_HOME=/opt/data -e HOME=/opt/data -w /opt/hermes \
-    -v "$DATA_DIR/.hermes:/opt/data" --entrypoint /opt/hermes/bin/hermes hermes-agent-local "$@"
+    -v "$DATA_DIR/.hermes:/opt/data" --entrypoint /opt/hermes/bin/hermes "$IMAGE" "$@"
 }
 hermes_quiet() { hermes "$@" >/dev/null 2>&1; }
 
@@ -191,7 +214,7 @@ else
       [ "${#password}" -ge 12 ] || die "a password of at least 12 characters is required (SETUP_WEBAPP_PASSWORD)"
       # Only the scrypt hash is stored; the password goes in on stdin.
       hash="$(printf '%s' "$password" | docker run --rm -i --network none -w /opt/hermes \
-        --entrypoint /opt/hermes/.venv/bin/python hermes-agent-local -c \
+        --entrypoint /opt/hermes/.venv/bin/python "$IMAGE" -c \
         'import sys; from plugins.dashboard_auth.basic import hash_password; print(hash_password(sys.stdin.read()))' 2>/dev/null | tail -n1)"
       unset password again
       case "$hash" in scrypt\$*) ;; *) die "could not hash the password" ;; esac
@@ -231,7 +254,7 @@ elif yes_no SETUP_SIGNAL "Link a Signal account, so that you can talk to the age
       case "$line" in
         sgnl://*|tsdevice:*)
           printf '%s' "$line" | docker run --rm -i --network none --entrypoint /opt/hermes/.venv/bin/python \
-            hermes-agent-local -c 'import sys, qrcode; q = qrcode.QRCode(border=2); q.add_data(sys.stdin.read().strip()); q.print_ascii(invert=True)'
+            "$IMAGE" -c 'import sys, qrcode; q = qrcode.QRCode(border=2); q.add_data(sys.stdin.read().strip()); q.print_ascii(invert=True)'
           ;;
         *Associated\ with*) printf '%s' "$line" | grep -o '+[0-9]\{6,\}' | head -n1 > "$result" ;;
         *) printf '    %s\n' "$line" ;;
@@ -256,7 +279,9 @@ else
 fi
 
 # ── 7. Start ─────────────────────────────────────────────────────────────────
-if [ -z "$(env_get AUTO_DEPLOY)" ] && yes_no SETUP_AUTO_DEPLOY "Deploy new commits from git automatically?" no; then
+# Only a git checkout can follow its remote; an installation from a published
+# image is updated by extracting a newer image (see README).
+if [ -d .git ] && [ -z "$(env_get AUTO_DEPLOY)" ] && yes_no SETUP_AUTO_DEPLOY "Deploy new commits from git automatically?" no; then
   env_set AUTO_DEPLOY true
 fi
 

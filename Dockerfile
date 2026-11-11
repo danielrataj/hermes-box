@@ -1,8 +1,13 @@
 # Official Hermes image plus what this setup needs on top:
 #   - sops and age: secrets are decrypted inside the container at start
 #   - uv on PATH and the himalaya mail CLI: used by cron jobs
-ARG HERMES_IMAGE_TAG=stable
-FROM nousresearch/hermes-agent:${HERMES_IMAGE_TAG}
+#
+# The Hermes version is pinned here, so that every build of one commit gives
+# the same agent. To upgrade Hermes, change the tag below (see README, Upgrade
+# Hermes). HERMES_IMAGE_TAG overrides it for one build, e.g. v0.23.1-desktop
+# for Bot Desktop.
+ARG HERMES_IMAGE_TAG=
+FROM nousresearch/hermes-agent:${HERMES_IMAGE_TAG:-v0.23.1}
 
 # Keep the root entrypoint; s6 drops privileges for the runtime.
 USER root
@@ -54,5 +59,28 @@ RUN set -e; f=/opt/hermes/agent/codex_headers.py; \
     cd /opt/hermes && .venv/bin/python -c 'from agent.codex_headers import codex_request_compression_hooks as hooks; assert hooks("https://chatgpt.com/backend-api/codex") is None and hooks("https://chatgpt.com/backend-api/codex", async_mode=True) is None'
 
 COPY --chmod=0755 docker/secrets-entrypoint.sh /usr/local/bin/secrets-entrypoint
+
+# The image also carries the files a server needs around the containers
+# (compose.yaml, the scripts, the systemd units), so that an installation
+# needs nothing but this image: docker/extract.sh copies them to the host.
+# Only what is listed here goes in; instance/ never does (see .dockerignore).
+COPY --chmod=0755 docker/extract.sh /usr/local/bin/hermes-box-extract
+COPY compose.yaml install.sh setup.sh check.sh sops.sh Dockerfile README.md LICENSE /opt/hermes-box/
+COPY backup /opt/hermes-box/backup
+COPY caddy /opt/hermes-box/caddy
+COPY deploy /opt/hermes-box/deploy
+COPY docker /opt/hermes-box/docker
+COPY instance.example /opt/hermes-box/instance.example
+COPY monitor /opt/hermes-box/monitor
+COPY server /opt/hermes-box/server
+# A published image knows its own name: release.env tells the scripts on the
+# host which image to run, instead of building one there. Empty for a local
+# build, which then keeps the name hermes-agent-local.
+ARG HERMES_BOX_IMAGE=
+RUN if [ -n "$HERMES_BOX_IMAGE" ]; then \
+      printf '# Written when the image was published; read by install.sh and compose.\nHERMES_BOX_IMAGE=%s\n' "$HERMES_BOX_IMAGE" > /opt/hermes-box/release.env; \
+    fi
+LABEL org.opencontainers.image.source="https://github.com/danielrataj/hermes-box" \
+      org.opencontainers.image.licenses="MIT"
 ENTRYPOINT ["/usr/local/bin/secrets-entrypoint"]
 CMD []
