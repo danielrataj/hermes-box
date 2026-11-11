@@ -387,7 +387,7 @@ cd /opt/hermes-box && ./setup.sh
 ## Vydání nové verze
 
 Verze Hermes je připnutá v `Dockerfile` (`HERMES_IMAGE_TAG`). Upgrade Hermes
-je změna toho tagu; CI při každé změně image sestaví a vyzkouší, takže
+je změna toho tagu; CI v každém pull requestu image sestaví a vyzkouší, takže
 verze, na kterou `Dockerfile` nesedí, neprojde.
 
 Vydání je tag ve tvaru `v1.2.3`:
