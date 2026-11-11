@@ -1,6 +1,7 @@
-# Builds the image on every change, so that a Hermes release the Dockerfile
-# no longer fits is noticed here and not on a server, and publishes it to
-# ghcr.io when a version tag (v1.2.3) is pushed.
+# Builds the image for every pull request, so that a Hermes release the
+# Dockerfile no longer fits is noticed here and not on a server, and publishes
+# it to ghcr.io when a version tag (v1.2.3) is pushed. A push to master does
+# not run it: the same commit was built in its pull request.
 #
 #   v1.2.3      -> ghcr.io/<owner>/hermes-box:1.2.3, :1.2 and :1
 #   v1.2.3-rc.1 -> ghcr.io/<owner>/hermes-box:1.2.3-rc.1 only
@@ -13,7 +14,6 @@ name: Image
 on:
   pull_request:
   push:
-    branches: [master]
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
 
 permissions:
