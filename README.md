@@ -292,9 +292,7 @@ version numbers, so they are pinned to a build and updated by hand together
 with the API.
 
 The browser is slower and costs more tokens than `web_extract`; it is for
-pages that need JavaScript or a sign-in. Neither helps where a site refuses
-the server's address: PubMed answers a data-centre address with HTTP 403 either
-way, and its API (E-utilities) is the way in.
+pages that need JavaScript or a sign-in.
 
 ## Files
 
