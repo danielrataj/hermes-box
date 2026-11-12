@@ -487,9 +487,11 @@ cd /opt/hermes-box && ./setup.sh
 
 ## Releasing a new version
 
-The Hermes version is pinned in the `Dockerfile` (`HERMES_IMAGE_TAG`).
+The Hermes version is pinned in the `Dockerfile` (the `pinned` stage).
 Upgrading Hermes is a change of that tag; CI builds and tests the image in
 every pull request, so a version the `Dockerfile` does not fit will not pass.
+Dependabot (`.github/dependabot.yml`) checks daily and opens that pull request
+when Hermes publishes a new version; merging it and releasing stay manual.
 
 A release is a tag of the form `v1.2.3`:
 
