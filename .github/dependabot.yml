@@ -1,0 +1,19 @@
+# Opens a pull request when something this repository pins has a new version.
+# The Image workflow builds and tests every pull request, so a Hermes release
+# the Dockerfile no longer fits fails there. Nothing is merged or released
+# automatically: merge the pull request and push a version tag (see README,
+# Releasing a new version).
+
+version: 2
+updates:
+  # The Hermes image (the "pinned" stage) and the other images in the Dockerfile.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: daily
+
+  # The actions the Image workflow uses.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
