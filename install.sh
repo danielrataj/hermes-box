@@ -217,11 +217,12 @@ note "all files in instance/secrets/ decrypt with this server's key"
 config_changed=0
 if [ -f "$DATA_DIR/.hermes/config.yaml" ]; then
   say "Checking settings in config.yaml"
-  hermes_config() {
+  hermes_offline() {  # the hermes CLI against the data directory, offline
     docker run --rm --network none --entrypoint /opt/hermes/bin/hermes \
       -u "$RUN_UID:$RUN_GID" -e HERMES_HOME=/opt/data -e HOME=/opt/data \
-      -v "$DATA_DIR/.hermes:/opt/data" "$IMAGE" config "$@" 2>/dev/null
+      -v "$DATA_DIR/.hermes:/opt/data" "$IMAGE" "$@" 2>/dev/null
   }
+  hermes_config() { hermes_offline config "$@"; }
   want_url="https://$DOMAIN"
   if [ "$(hermes_config get webapp.enabled | tail -n1)" != "true" ]; then
     hermes_config set webapp.enabled true >/dev/null
@@ -239,6 +240,38 @@ if [ -f "$DATA_DIR/.hermes/config.yaml" ]; then
     hermes_config set terminal.home_mode real >/dev/null
     note "set terminal.home_mode = real"; config_changed=1
   fi
+  # The browser: the image ships Chromium, so cron jobs can open pages that
+  # web_extract cannot read. Without a provider Hermes picks one from whatever
+  # keys it finds, and a cloud one would be chosen over the local Chromium;
+  # a provider somebody chose on purpose is left alone.
+  if ! hermes_config get browser.cloud_provider | tail -n1 | grep -qx '[a-z0-9_-]\{1,\}'; then
+    hermes_config set browser.cloud_provider local >/dev/null
+    note "set browser.cloud_provider = local"; config_changed=1
+  fi
+  # browser_exec is offered only to sessions that also have the terminal.
+  cron_tools="$(hermes_offline tools list --platform cron || true)"
+  for toolset in browser terminal; do
+    if ! printf '%s\n' "$cron_tools" | grep -q " enabled  *$toolset "; then
+      if hermes_offline tools enable "$toolset" --platform cron >/dev/null; then
+        note "enabled the $toolset toolset for cron jobs"; config_changed=1
+      else
+        note "could not enable the $toolset toolset for cron jobs"
+      fi
+    fi
+  done
+  # The Firecrawl in compose.yaml both searches and reads pages. Hermes chooses a
+  # backend from the keys it finds only until one is written to config.yaml,
+  # so an earlier choice (often a search-only one) would keep web_extract
+  # failing. web.search_backend and web.extract_backend take precedence over
+  # web.backend and are left alone: that is where to choose something else.
+  if [ "$(hermes_config get web.backend | tail -n1)" != "firecrawl" ]; then
+    hermes_config set web.backend firecrawl >/dev/null
+    note "set web.backend = firecrawl"; config_changed=1
+  fi
+  for key in web.search_backend web.extract_backend; do
+    other="$(hermes_config get "$key" | tail -n1 | grep -x '[a-z0-9_-]\{1,\}' || true)"
+    [ -z "$other" ] || [ "$other" = firecrawl ] || note "$key = $other overrides Firecrawl for that half"
+  done
   [ "$config_changed" -eq 1 ] || note "already set"
   # The Hermes image leaves pnpm to be installed into the data directory
   # (<data>/.hermes/tools) and complains on every start until it is there:
