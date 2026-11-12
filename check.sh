@@ -48,6 +48,20 @@ restarts="$(docker inspect -f '{{.RestartCount}}' hermes 2>/dev/null || echo 0)"
 if [ "$restarts" -eq 0 ]; then ok "container hermes has not crashed"
 else fail "container hermes was restarted ${restarts}x after a crash"; fi
 
+# The local Firecrawl: the agent's web search and page reading.
+for name in hermes-firecrawl hermes-firecrawl-playwright hermes-firecrawl-redis hermes-firecrawl-rabbitmq hermes-firecrawl-postgres; do
+  state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
+  if [ "$state" = running ]; then ok "container $name is running"; else fail "container $name is $state"; fi
+done
+# Its API comes up later than the Webapp after a restart, and a deployment
+# runs this check right then; give it a minute before calling it down.
+firecrawl_up() {
+  local i
+  for i in $(seq 1 12); do is_up http://127.0.0.1:3002/ && return 0; sleep 5; done
+  return 1
+}
+check "Firecrawl answers on 127.0.0.1:3002" firecrawl_up
+
 # ── Agent ────────────────────────────────────────────────────────────────────
 if grep -Eqs '^model:' "$DATA_DIR/.hermes/config.yaml"; then ok "a model is configured"
 else warn "no model is configured: the agent will not answer (see README, Model and provider)"; fi

@@ -24,10 +24,11 @@ The solution is split into two parts:
 You need a server with Linux (x86_64, with systemd), a domain pointing at its
 address, and ports 80 and 443 open. Everything is run as root.
 
-Size: the image is about 5 GB and a fresh installation takes about 9 GB of
-disk; an update needs room for a second image for a while, so plan for 40 GB
-or more. The agent's container uses about 250 MB of memory when idle. 2 GB of
-RAM is a sensible minimum; with 1 GB it runs only with swap.
+Size: the image is about 5 GB, Firecrawl's images about 6 GB, and a fresh
+installation takes about 15 GB of disk; an update needs room for a second
+image for a while, so plan for 40 GB or more. When idle, the agent's container
+uses about 250 MB of memory and Firecrawl about 2 GB. 4 GB of RAM is a
+sensible minimum, and with that little the server needs swap.
 
 To try it out without a domain of your own, use `<address>.sslip.io` as the
 host name, for example `203.0.113.7.sslip.io`: it resolves to that address and
@@ -127,7 +128,7 @@ instance repository into `/opt/hermes-box/instance/` and run:
 ```
 
 The script checks the prerequisites, creates the user and directories, pulls or
-builds the image, verifies the key and secrets, configures the Webapp in
+builds the image, verifies the key and secrets, configures the Webapp and the browser in
 `config.yaml`, installs the systemd units and starts the stack. It can be run
 repeatedly; it does not change existing data. It leaves a running stack alone
 unless it is given `--restart`. On a new server it creates a key and prints its
@@ -198,12 +199,13 @@ Without `--restart` only the image is built and the units are updated.
 
 ## What runs
 
-Two containers, both with the `host` network mode:
+Seven containers. The first two use the `host` network mode:
 
 | Container | Image | What it does | Where it listens |
 | --- | --- | --- | --- |
 | `hermes` | `ghcr.io/danielrataj/hermes-box:<version>`, or `hermes-agent-local` built from the `Dockerfile` | gateway: agent, cron, sessions, Bots; plus the Webapp and dashboard | Webapp `127.0.0.1:9120`, dashboard `127.0.0.1:9119` |
 | `hermes-caddy` | `caddy:2.11` | TLS and reverse proxy | `80`, `443` |
+| `hermes-firecrawl` and four `hermes-firecrawl-*` (Playwright, Redis, RabbitMQ, Postgres) | see `compose.yaml` | web search and page reading for the agent | API `127.0.0.1:3002`; the rest only on a network of their own |
 
 - The **Webapp** runs at `https://<HERMES_DOMAIN>` behind a Nous login.
 - The **Dashboard** (administration) is not exposed. Access it through an SSH
@@ -238,6 +240,61 @@ alerts through it. Create the directory for its data yourself, owned by
 `HERMES_UID`; Docker would create a missing one as root.
 
 Everything in `instance/` runs as root on the server, like this repository.
+
+## Web and browser
+
+The agent has two ways to the web, and they are set separately in
+`config.yaml`:
+
+- **`web_search` and `web_extract`** go through a backend. Here that is the
+  Firecrawl on this server, for both; see below. Another backend can be
+  chosen for either half. Some only search (`brave-free`, `ddgs`, `searxng`)
+  and cannot read a page; reading needs one that also extracts (`firecrawl`,
+  `tavily`, `exa`, `parallel`):
+
+  ```bash
+  docker exec -u 1000:1000 -e HOME=/opt/data hermes hermes config set web.search_backend brave-free
+  ```
+
+  The keys of such a backend (`BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY`, …)
+  belong in `secrets/hermes.enc.yaml`; see [Secrets](#secrets).
+- **The browser** is the Chromium that the Hermes image ships; nothing else
+  has to be installed. `install.sh` sets `browser.cloud_provider: local`
+  unless a provider is already chosen, and enables the `browser` and
+  `terminal` toolsets for cron jobs (the browser tool is offered only together
+  with the terminal). A cron job that lists its own `enabled_toolsets` has to
+  name both. Other platforms are set with
+  `hermes tools enable browser --platform <name>`.
+
+### Firecrawl on this server
+
+Searching and reading pages need no account: a Firecrawl runs here, in five
+containers (API, Playwright, Redis, RabbitMQ, Postgres), and `compose.yaml`
+gives the agent its address (`FIRECRAWL_API_URL`). `install.sh` sets
+`web.backend: firecrawl` in `config.yaml`, which makes it the backend for both
+halves; what it cannot read is left to the browser. `web.search_backend` and
+`web.extract_backend` take precedence over `web.backend` and are not touched,
+so a different choice for one half goes there. Hermes installs its Firecrawl
+client into the data directory the first time the agent uses it. `check.sh`
+watches the five containers and the API. To try it on the server:
+
+```bash
+curl -s -X POST http://127.0.0.1:3002/v2/scrape -H 'Content-Type: application/json' -d '{"url":"https://example.com","formats":["markdown"]}'
+```
+
+The API has no authentication, which is why it listens on loopback only.
+Nothing in it is worth backing up: its two volumes hold a job queue. While
+Firecrawl does not answer, Hermes reads pages through the free tiers of public
+services instead (`web.keyless_rescue`, on by default; `false` keeps the
+requests on this server and lets them fail). The versions are pinned in
+`compose.yaml`; the Playwright and Postgres images are published without
+version numbers, so they are pinned to a build and updated by hand together
+with the API.
+
+The browser is slower and costs more tokens than `web_extract`; it is for
+pages that need JavaScript or a sign-in. Neither helps where a site refuses
+the server's address: PubMed answers a data-centre address with HTTP 403 either
+way, and its API (E-utilities) is the way in.
 
 ## Files
 
