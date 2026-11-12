@@ -294,6 +294,28 @@ with the API.
 The browser is slower and costs more tokens than `web_extract`; it is for
 pages that need JavaScript or a sign-in.
 
+## Look of the Webapp
+
+The Webapp is Hermes Desktop in a browser, and many of its controls are sized
+for a mouse. `skin/default.yaml` makes them larger on a phone or tablet:
+buttons, the entries of the left panel and of menus, form fields, the status
+bar and the text of a conversation. `install.sh` copies it to
+`<data>/.hermes/skins/default.yaml`; Hermes puts the `customCSS` of that file
+into the page, and the Webapp picks a change up on the next page load.
+
+- All rules sit in one media query for touch screens; with a mouse nothing
+  changes.
+- The skin is named `default`, so it keeps the colours of Hermes and applies
+  without any setting. It applies while the Webapp uses its default theme; a
+  different theme chosen in the Webapp's settings does not carry it.
+- To change the look, edit `skin/default.yaml` and deploy. Only CSS is
+  possible, up to 32 KiB.
+- To keep a `default.yaml` of your own on the server, remove its first line
+  (`# hermes-box: managed …`); `install.sh` then leaves the file alone.
+- The selectors follow the Webapp of the pinned Hermes version. After
+  [upgrading Hermes](#releasing-a-new-version), open the Webapp on a phone
+  and check that the controls are still large.
+
 ## Files
 
 | File | Purpose |
@@ -311,6 +333,7 @@ pages that need JavaScript or a sign-in.
 | `instance.example/` | template of the `instance/` directory |
 | `sops.sh` | `sops` from Docker, for editing secrets without an installation |
 | `caddy/Caddyfile` | domain → Webapp |
+| `skin/default.yaml` | CSS for the Webapp on touch screens; see [Look of the Webapp](#look-of-the-webapp) |
 | `backup/hermes-backup.sh` | daily backup |
 | `check.sh` | health check of the whole solution |
 | `monitor/hermes-monitor.sh` | periodic check and alerts |

@@ -1,0 +1,93 @@
+# hermes-box: managed by install.sh (remove this line to keep your own changes)
+#
+# Makes the Webapp easier to use on a phone or tablet. Hermes reads this file
+# from <data>/.hermes/skins/default.yaml and puts customCSS into the page as a
+# <style> tag. The name is `default` on purpose: a skin with a built-in name
+# keeps the built-in colours and only adds its CSS, and it applies without
+# display.skin being set. The limit for customCSS is 32 KiB.
+#
+# Everything is inside one media query, so a mouse-driven browser sees no
+# change. The selectors (data-size, data-slot, data-sidebar) come from the
+# Webapp of the Hermes version pinned in the Dockerfile; look at them again
+# after an upgrade (README, Look of the Webapp).
+name: default
+description: Hermes default, with larger controls on touch screens
+customCSS: |
+  @media (hover: none), (pointer: coarse) {
+    /* Text of a conversation: 13 px is small on a phone. */
+    html[data-hermes-desktop-host="browser"] {
+      --conversation-text-base-size: .9375rem;
+      --conversation-base-line-height: 1.375rem;
+      --conversation-caption-base-size: .8125rem;
+      --conversation-caption-base-line-height: 1.125rem;
+      --conversation-tool-base-size: .75rem;
+    }
+
+    /* Buttons: the two small sizes are 20 and 24 px high. */
+    html[data-hermes-desktop-host="browser"] [data-size="xs"] {
+      min-height: 2.25rem;
+      padding-inline: .625rem;
+      font-size: .8125rem;
+    }
+    html[data-hermes-desktop-host="browser"] [data-size="sm"] {
+      min-height: 2.5rem;
+      padding-inline: .75rem;
+      font-size: .875rem;
+    }
+    html[data-hermes-desktop-host="browser"] :is([data-size="icon-xs"], [data-size="icon"], [data-size="icon-titlebar"]) {
+      min-width: 2.25rem;
+      min-height: 2.25rem;
+    }
+
+    /* Left panel: its entries and the tabs above them. */
+    html[data-hermes-desktop-host="browser"] [data-sidebar="menu-button"] {
+      min-height: 2.75rem;
+      font-size: .9375rem;
+    }
+    html[data-hermes-desktop-host="browser"] .group\/pane-header {
+      height: 2.5rem;
+    }
+    html[data-hermes-desktop-host="browser"] [data-slot="pane-tab"] {
+      font-size: .8125rem;
+    }
+
+    /* Form fields and what opens a menu. */
+    html[data-hermes-desktop-host="browser"] :is([data-slot="select-trigger"], [data-slot="input"]) {
+      min-height: 2.75rem;
+    }
+    /* :where() keeps this weaker than the status bar's rule below. */
+    html[data-hermes-desktop-host="browser"] :where([data-slot="dropdown-menu-trigger"]:not([data-size])) {
+      min-height: 2.5rem;
+      font-size: .875rem;
+    }
+    html[data-hermes-desktop-host="browser"] [data-slot="switch"] {
+      zoom: 1.5;
+    }
+
+    /* Entries of menus and lists. */
+    html[data-hermes-desktop-host="browser"] :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]) {
+      min-height: 2.75rem;
+      font-size: .9375rem;
+    }
+
+    /* Status bar at the bottom: 20 px high, and cut off on a narrow screen. */
+    html[data-hermes-desktop-host="browser"] [data-slot="statusbar"] {
+      height: 2.25rem;
+    }
+    html[data-hermes-desktop-host="browser"] [data-slot="statusbar"] > div {
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    html[data-hermes-desktop-host="browser"] [data-slot="statusbar"] button {
+      flex-shrink: 0;
+      min-height: 0;
+      padding-inline: .5rem;
+      font-size: .75rem;
+      white-space: nowrap;
+    }
+
+    html[data-hermes-desktop-host="browser"] .thread-jump-button {
+      height: 2.5rem;
+      font-size: .8125rem;
+    }
+  }

@@ -293,6 +293,21 @@ else
   note "Restore the data first, or run ./setup.sh for a first-time setup."
 fi
 
+# The Webapp on a phone: larger controls, as CSS in a skin that Hermes reads
+# from the data directory (README, Look of the Webapp). The Webapp picks a
+# change up on the next page load. A default.yaml without the marker in its
+# first line is somebody's own and is left alone.
+skin="$DATA_DIR/.hermes/skins/default.yaml"
+if [ ! -e "$skin" ] || head -n1 "$skin" | grep -q '^# hermes-box: managed'; then
+  if ! cmp -s skin/default.yaml "$skin"; then
+    as_owner mkdir -p "$DATA_DIR/.hermes/skins"
+    install -m 644 -o "$RUN_UID" -g "$RUN_GID" skin/default.yaml "$skin"
+    note "installed the Webapp skin for touch screens: $skin"
+  fi
+else
+  note "$skin is your own; the skin for touch screens was not installed"
+fi
+
 # ── 6. systemd units ─────────────────────────────────────────────────────────
 say "Installing systemd units"
 units_changed=0
