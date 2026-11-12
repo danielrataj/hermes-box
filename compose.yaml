@@ -83,6 +83,8 @@ services:
       # jobs keep their state files under those absolute paths. The check
       # compares path prefixes, so each mount has to be listed.
       HERMES_WRITE_SAFE_ROOT: "/opt/data:/home/hermes/.hermes:/home/hermes/openknowledge:/home/hermes/projects:/home/hermes/.local/bin"
+      # The Firecrawl below; the agent's web tools search and read pages with it.
+      FIRECRAWL_API_URL: http://127.0.0.1:3002
 
     volumes:
       # The agent's secrets, encrypted; see docker/secrets-entrypoint.sh.
@@ -117,9 +119,142 @@ services:
       - caddy-data:/data
       - caddy-config:/config
 
+  # ── Firecrawl ──────────────────────────────────────────────────────────────
+  # Searches the web and reads pages for the agent's web_search and
+  # web_extract, on this server and without an API key (see README, Web and
+  # browser). Five containers on a network of their own.
+  # They follow Firecrawl's own docker-compose.yaml, with published images
+  # instead of a build and smaller limits: one agent, not a crawling service.
+  # The API has no authentication, so it is published on loopback only.
+  firecrawl:
+    image: ghcr.io/firecrawl/firecrawl:2.11.728
+    container_name: hermes-firecrawl
+    logging: *logging
+    restart: unless-stopped
+    networks: [firecrawl]
+    ports:
+      - "127.0.0.1:3002:3002"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3002"
+      EXTRACT_WORKER_PORT: "3004"
+      WORKER_PORT: "3005"
+      ENV: local
+      USE_DB_AUTHENTICATION: "false"
+      REDIS_URL: redis://firecrawl-redis:6379
+      REDIS_RATE_LIMIT_URL: redis://firecrawl-redis:6379
+      PLAYWRIGHT_MICROSERVICE_URL: http://firecrawl-playwright:3000/scrape
+      NUQ_RABBITMQ_URL: amqp://firecrawl-rabbitmq:5672
+      POSTGRES_HOST: firecrawl-postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: postgres
+      # Reachable only on the firecrawl network; it holds the job queue.
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      # Each worker is a Node process of about 300 MB; the default is 5. One
+      # still scrapes several pages at a time.
+      NUQ_WORKER_COUNT: "1"
+      NUM_WORKERS_PER_QUEUE: "1"
+      CRAWL_CONCURRENT_REQUESTS: "4"
+      MAX_CONCURRENT_JOBS: "2"
+      BROWSER_POOL_SIZE: "2"
+      HARNESS_STARTUP_TIMEOUT_MS: "60000"
+    command: ["node", "dist/src/harness.js", "--start-docker"]
+    depends_on:
+      firecrawl-redis:
+        condition: service_started
+      firecrawl-playwright:
+        condition: service_started
+      firecrawl-rabbitmq:
+        condition: service_healthy
+      firecrawl-postgres:
+        condition: service_healthy
+    cpus: 2.0
+    mem_limit: 4G
+    memswap_limit: 4G
+
+  firecrawl-playwright:
+    # Firecrawl publishes this image and the Postgres one without version
+    # tags; these are the builds that were current for the API version above.
+    image: ghcr.io/firecrawl/playwright-service:sha-8b950c45c8ca
+    container_name: hermes-firecrawl-playwright
+    logging: *logging
+    restart: unless-stopped
+    networks: [firecrawl]
+    environment:
+      PORT: "3000"
+      MAX_CONCURRENT_PAGES: "4"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp/.cache:noexec,nosuid,size=1g
+    cpus: 2.0
+    mem_limit: 2G
+    memswap_limit: 2G
+
+  firecrawl-redis:
+    image: redis:8-alpine
+    container_name: hermes-firecrawl-redis
+    logging: *logging
+    restart: unless-stopped
+    networks: [firecrawl]
+    # Nothing is kept: the image's /data would otherwise be a new anonymous
+    # volume on every start.
+    command: ["redis-server", "--bind", "0.0.0.0", "--save", "", "--appendonly", "no"]
+    tmpfs:
+      - /data
+
+  firecrawl-rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: hermes-firecrawl-rabbitmq
+    logging: *logging
+    restart: unless-stopped
+    networks: [firecrawl]
+    # RabbitMQ names its data after the host name.
+    hostname: firecrawl-rabbitmq
+    volumes:
+      - firecrawl-rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
+
+  firecrawl-postgres:
+    image: ghcr.io/firecrawl/nuq-postgres:sha-a7a63b4bfabf
+    container_name: hermes-firecrawl-postgres
+    logging: *logging
+    restart: unless-stopped
+    networks: [firecrawl]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    # The job queue only; losing this volume loses nothing worth keeping.
+    volumes:
+      - firecrawl-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+networks:
+  firecrawl:
+
 volumes:
   caddy-data:
   caddy-config:
+  firecrawl-postgres:
+  firecrawl-rabbitmq:
 
 secrets:
   age_key:
