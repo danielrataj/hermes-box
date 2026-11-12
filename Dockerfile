@@ -77,6 +77,7 @@ COPY docker /opt/hermes-box/docker
 COPY instance.example /opt/hermes-box/instance.example
 COPY monitor /opt/hermes-box/monitor
 COPY server /opt/hermes-box/server
+COPY skin /opt/hermes-box/skin
 # A published image knows its own name: release.env tells the scripts on the
 # host which image to run, instead of building one there. Empty for a local
 # build, which then keeps the name hermes-agent-local.
