@@ -24,7 +24,7 @@
 #   SETUP_DOMAIN=agent.example.com      public host name of the Webapp
 #   SETUP_DATA_DIR=/home/hermes         where all state lives
 #   SETUP_MODEL=wizard|skip             run Hermes' model wizard
-#   SETUP_WEBAPP_LOGIN=password|skip
+#   SETUP_WEBAPP_LOGIN=skip             leave the Webapp sign-in for later
 #   SETUP_WEBAPP_USER=admin  SETUP_WEBAPP_PASSWORD=...
 #   SETUP_AUTO_DEPLOY=yes|no
 
@@ -218,8 +218,9 @@ drop_nous_login() {
 if [ -n "$(hermes config get dashboard.basic_auth.username 2>/dev/null | tail -n1)" ]; then
   note "already configured"
 else
-  login="$(ask SETUP_WEBAPP_LOGIN "Set the user name and password now? (password/skip)" password)"
-  case "$login" in
+  # No question here: asking "password or skip?" invites typing the password
+  # itself into a prompt that shows it.
+  case "${SETUP_WEBAPP_LOGIN:-password}" in
     password)
       user="$(ask SETUP_WEBAPP_USER "User name" admin)"
       password="${SETUP_WEBAPP_PASSWORD:-}"
