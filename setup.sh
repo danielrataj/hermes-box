@@ -24,7 +24,7 @@
 #   SETUP_DOMAIN=agent.example.com      public host name of the Webapp
 #   SETUP_DATA_DIR=/home/hermes         where all state lives
 #   SETUP_MODEL=wizard|skip             run Hermes' model wizard
-#   SETUP_WEBAPP_LOGIN=password|nous|skip
+#   SETUP_WEBAPP_LOGIN=password|skip
 #   SETUP_WEBAPP_USER=admin  SETUP_WEBAPP_PASSWORD=...
 #   SETUP_AUTO_DEPLOY=yes|no
 
@@ -200,13 +200,25 @@ fi
 
 # ── 5. Sign-in for the Webapp ────────────────────────────────────────────────
 say "Sign-in for the Webapp"
-has_login=0
-[ -z "$(hermes config get dashboard.basic_auth.username 2>/dev/null | tail -n1)" ] || has_login=1
-grep -qs '^HERMES_DASHBOARD_OAUTH_CLIENT_ID=.' "$DATA_DIR/.hermes/.env" && has_login=1
-if [ "$has_login" -eq 1 ]; then
+# The user name and password are the only sign-in. A server that used a Nous
+# Portal account counts as not set up, and setting the password removes that
+# sign-in: Hermes would otherwise offer both. The Nous account itself stays
+# logged in, so a model served by Nous Portal keeps working.
+drop_nous_login() {
+  local env="$DATA_DIR/.hermes/.env" tmp
+  if grep -qs '^HERMES_DASHBOARD_OAUTH_CLIENT_ID=' "$env"; then
+    tmp="$(mktemp)"
+    grep -v '^HERMES_DASHBOARD_OAUTH_CLIENT_ID=' "$env" > "$tmp" || true
+    cat "$tmp" > "$env"; rm -f "$tmp"
+    note "removed the Nous Portal sign-in"
+  fi
+  hermes_quiet config unset dashboard.oauth.client_id || true
+  rm -f "$DATA_DIR/.hermes/webapp/sign-in-registration.json"
+}
+if [ -n "$(hermes config get dashboard.basic_auth.username 2>/dev/null | tail -n1)" ]; then
   note "already configured"
 else
-  login="$(ask SETUP_WEBAPP_LOGIN "How do you want to sign in? password = a user name and password, nous = a Nous Portal account, skip = decide later" password)"
+  login="$(ask SETUP_WEBAPP_LOGIN "Set the user name and password now? (password/skip)" password)"
   case "$login" in
     password)
       user="$(ask SETUP_WEBAPP_USER "User name" admin)"
@@ -229,15 +241,8 @@ else
       hermes_quiet config set dashboard.basic_auth.username "$user"
       hermes_quiet config set dashboard.basic_auth.password_hash "$hash"
       hermes_quiet config set dashboard.basic_auth.secret "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+      drop_nous_login
       note "sign in at https://$DOMAIN as '$user' with that password"
-      changed=1
-      ;;
-    nous)
-      [ "$interactive" -eq 1 ] || die "the Nous sign-in needs a terminal; run ./setup.sh interactively"
-      hermes_quiet config set webapp.public_url "https://$DOMAIN"
-      note "log in to Nous Portal, then this server is registered as your dashboard"
-      HERMES_TTY=1 HERMES_NET=host hermes portal </dev/tty || die "the Nous login did not finish"
-      HERMES_TTY=1 HERMES_NET=host hermes dashboard register </dev/tty || die "registering with Nous Portal failed"
       changed=1
       ;;
     *)

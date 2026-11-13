@@ -81,7 +81,7 @@ The wizard asks a few questions and performs the whole initial setup:
 2. user, data directories, the server's private key,
 3. the first encrypted secrets, including a random backup password,
 4. model and provider: runs Hermes's own wizard,
-5. Webapp login: a user name and password, or a Nous Portal account,
+5. Webapp login: a user name and password,
 6. installation of the services, start, first backup and check.
 
 It can be run again, also on a server that is already running; finished
@@ -207,7 +207,8 @@ Seven containers. The first two use the `host` network mode:
 | `hermes-caddy` | `caddy:2.11` | TLS and reverse proxy | `80`, `443` |
 | `hermes-firecrawl` and four `hermes-firecrawl-*` (Playwright, Redis, RabbitMQ, Postgres) | see `compose.yaml` | web search and page reading for the agent | API `127.0.0.1:3002`; the rest only on a network of their own |
 
-- The **Webapp** runs at `https://<HERMES_DOMAIN>` behind a Nous login.
+- The **Webapp** runs at `https://<HERMES_DOMAIN>` behind a login with
+  the user name and password chosen during setup.
 - The **Dashboard** (administration) is not exposed. Access it through an SSH
   tunnel:
 

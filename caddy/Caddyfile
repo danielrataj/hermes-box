@@ -1,6 +1,6 @@
 # Public entry point of the server. TLS certificates are issued automatically.
 
-# Hermes Webapp (Desktop workspace in a browser, incl. Bots), behind Nous sign-in.
+# Hermes Webapp (Desktop workspace in a browser, incl. Bots), behind Hermes' own sign-in.
 # The dashboard (127.0.0.1:9119) is not published; reach it over an SSH tunnel.
 {$HERMES_DOMAIN} {
 	reverse_proxy 127.0.0.1:9120
