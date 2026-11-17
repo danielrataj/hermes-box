@@ -146,7 +146,7 @@ Secrets).
 | `HERMES_DATA_DIR` | `/home/hermes` | where all state lives |
 | `HERMES_UID`, `HERMES_GID` | `1000` | owner of the data |
 | `HERMES_BOX_IMAGE` | from `release.env` | an image other than the one the installation came with |
-| `HERMES_IMAGE_TAG` | the version in the `Dockerfile` | only when building yourself: another Hermes version, e.g. `v0.23.1-desktop` for Bot Desktop |
+| `HERMES_IMAGE_TAG` | the version in the `Dockerfile` | only when building yourself: another Hermes version, e.g. `v0.23.2-desktop` for Bot Desktop |
 
 The `.env` file in the root is only a link to `instance/.env`, created by
 `install.sh`.
