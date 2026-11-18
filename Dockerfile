@@ -6,11 +6,14 @@
 # the same agent. To upgrade Hermes, change the tag of the "pinned" stage below
 # (see README, Releasing a new version); Dependabot opens a pull request for
 # it when Hermes publishes a new one, which is why the tag is written out in a
-# FROM line of its own. HERMES_IMAGE_TAG overrides it for one build, e.g.
-# v0.23.2-desktop for Bot Desktop; the pinned stage is then not used.
+# FROM line of its own. It is the -desktop variant: the same Hermes plus the
+# packages for Bot Desktop (Xvnc, Xfce), so that a bot can have a screen of
+# its own; the container has no sudo to add them later. HERMES_IMAGE_TAG
+# overrides it for one build, e.g. v0.23.2 for an image without them; the
+# pinned stage is then not used.
 ARG HERMES_IMAGE_TAG=
 ARG HERMES_BASE=${HERMES_IMAGE_TAG:+nousresearch/hermes-agent:}${HERMES_IMAGE_TAG:-pinned}
-FROM nousresearch/hermes-agent:v0.23.2 AS pinned
+FROM nousresearch/hermes-agent:v0.23.2-desktop AS pinned
 FROM ${HERMES_BASE}
 
 # Keep the root entrypoint; s6 drops privileges for the runtime.
