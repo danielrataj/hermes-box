@@ -146,7 +146,7 @@ Secrets).
 | `HERMES_DATA_DIR` | `/home/hermes` | where all state lives |
 | `HERMES_UID`, `HERMES_GID` | `1000` | owner of the data |
 | `HERMES_BOX_IMAGE` | from `release.env` | an image other than the one the installation came with |
-| `HERMES_IMAGE_TAG` | the version in the `Dockerfile` | only when building yourself: another Hermes version, e.g. `v0.23.2-desktop` for Bot Desktop |
+| `HERMES_IMAGE_TAG` | the version in the `Dockerfile` | only when building yourself: another Hermes version, e.g. `v0.23.2` for an image without Bot Desktop |
 
 The `.env` file in the root is only a link to `instance/.env`, created by
 `install.sh`.
@@ -294,6 +294,31 @@ with the API.
 
 The browser is slower and costs more tokens than `web_extract`; it is for
 pages that need JavaScript or a sign-in.
+
+## A screen for a bot (Bot Desktop)
+
+A bot can have a desktop of its own, with a browser that keeps its profile
+between runs. You watch it in the Webapp and can take the keyboard and mouse
+over, for example to sign in to a site that wants a person; the session then
+stays in the bot's browser profile, and cron jobs of that bot use it.
+
+The image has what this needs (Xvnc, Xfce, Chromium); nothing is installed on
+the server. In the Webapp: **Bots**, right-click a bot, **Open Screen**,
+**Start screen**, then **Take over** and, when done, **Hand back**. From a
+shell:
+
+```bash
+docker exec -u 1000:1000 -e HOME=/opt/data hermes hermes computer-use screen status
+```
+
+- A screen is started only on request and stops after 30 minutes without use
+  (`bot_desktop.idle_stop_minutes`). With a browser open it takes 1 to 1.5 GB
+  of memory, and Hermes does not start one with less than about 1.5 GB free
+  (`bot_desktop.min_free_memory_mb`).
+- No port is opened. The picture goes over the Webapp's own connection, behind
+  its sign-in; Xvnc listens on a socket in the data directory only.
+- The bot's desktop state and browser profile are in `bot-desktop/` in the
+  data directory, and so in the backup.
 
 ## Look of the Webapp
 

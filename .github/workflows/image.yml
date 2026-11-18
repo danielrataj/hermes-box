@@ -68,6 +68,8 @@ jobs:
           docker run --rm --network none --entrypoint age-keygen "$IMAGE:$VERSION" --version
           docker run --rm --network none --entrypoint himalaya "$IMAGE:$VERSION" --version
           docker run --rm --network none --entrypoint /opt/hermes/bin/hermes "$IMAGE:$VERSION" --version
+          # Bot Desktop: the packages for a bot's screen are in the image.
+          docker run --rm --network none --entrypoint /opt/hermes/bin/hermes "$IMAGE:$VERSION" computer-use screen status | grep -F ']: installed'
 
           # What an installation gets out of it.
           out="$(mktemp -d)"
