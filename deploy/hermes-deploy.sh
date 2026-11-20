@@ -9,6 +9,7 @@
 #     -> validate, build the image if needed, update systemd units (install.sh)
 #     -> restart the stack only if what runs in the containers changed
 #     -> run check.sh; if it fails, go back to the previous commit and image
+#     -> remove the builds that are no longer the running or the previous image
 #     -> report the result (journal, and instance/notify.sh if there is one)
 #
 # A commit that failed is not tried again; push a new one.
@@ -30,6 +31,9 @@ DEPLOYING=/run/hermes-deploying     # tells the monitor to stay quiet
 RESTART_PATHS='^(compose\.yaml|Dockerfile|docker/|caddy/|instance/(\.env|compose\.yaml|secrets/))'
 BUILD_PATHS='^(Dockerfile|docker/)'
 
+# The label the Dockerfile gives every build of this image.
+IMAGE_LABEL='org.opencontainers.image.source=https://github.com/danielrataj/hermes-box'
+
 host="$(hostname)"
 log() { printf 'deploy: %s\n' "$*"; }
 
@@ -37,6 +41,14 @@ webapp_up() {
   case "$(curl -s -o /dev/null --max-time 10 -w '%{http_code}' http://127.0.0.1:9120/ 2>/dev/null)" in
     200|301|302) return 0 ;; *) return 1 ;;
   esac
+}
+
+# Every build leaves the one before it without a name, several GB each, and
+# check.sh fails a deploy once the disk is 85% full. Remove the builds of this
+# image that have no name any more: not :latest, not :rollback. Docker keeps
+# an image a container still runs, and images of anything else are not touched.
+prune_old_builds() {
+  docker image prune -f --filter "label=$IMAGE_LABEL" >/dev/null 2>&1 || true
 }
 
 # Restart the stack and wait until the Webapp answers and the checks pass.
@@ -148,6 +160,7 @@ $(git -C instance diff --name-only "$iold" "$inew" | sed 's#^#instance/#')"
           exit 1; }
     fi
     echo "$what" > "$FAILED"
+    [ "$needs_build" -eq 1 ] && prune_old_builds   # the build that failed
     notify "Hermes on $host: deploying $short ($subject) FAILED: $1. The previous version keeps running."
     exit 1
   }
@@ -162,6 +175,7 @@ $(git -C instance diff --name-only "$iold" "$inew" | sed 's#^#instance/#')"
   if [ "$needs_build" -eq 1 ]; then
     docker tag hermes-agent-local:latest hermes-agent-local:rollback 2>/dev/null
     out="$(./install.sh 2>&1)" || rollback "install.sh: $(echo "$out" | tail -n1)"
+    prune_old_builds   # what :rollback named until now; before check.sh looks at the disk
   else
     out="$(./install.sh --no-build 2>&1)" || rollback "install.sh: $(echo "$out" | tail -n1)"
   fi
