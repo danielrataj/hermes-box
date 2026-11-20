@@ -176,6 +176,11 @@ itself (`deploy/hermes-deploy.sh`):
 A commit whose deployment failed is not retried; fix it with a new commit.
 To retry the same one: `rm /var/lib/hermes-deploy/failed-commit`.
 
+Two builds of the image are kept: the running one and the one before it, for
+the rollback. Older builds, and a build that was rolled back, are removed after
+each build, because each takes several GB and `check.sh` fails a deploy once
+the disk is 85% full.
+
 To run it immediately without waiting for the timer:
 `systemctl start hermes-deploy`.
 
