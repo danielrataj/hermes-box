@@ -9,11 +9,11 @@
 # FROM line of its own. It is the -desktop variant: the same Hermes plus the
 # packages for Bot Desktop (Xvnc, Xfce), so that a bot can have a screen of
 # its own; the container has no sudo to add them later. HERMES_IMAGE_TAG
-# overrides it for one build, e.g. v0.23.2 for an image without them; the
+# overrides it for one build, e.g. v0.23.3 for an image without them; the
 # pinned stage is then not used.
 ARG HERMES_IMAGE_TAG=
 ARG HERMES_BASE=${HERMES_IMAGE_TAG:+nousresearch/hermes-agent:}${HERMES_IMAGE_TAG:-pinned}
-FROM nousresearch/hermes-agent:v0.23.2-desktop AS pinned
+FROM nousresearch/hermes-agent:v0.23.3-desktop AS pinned
 FROM ${HERMES_BASE}
 
 # Keep the root entrypoint; s6 drops privileges for the runtime.
